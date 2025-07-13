@@ -1,0 +1,9 @@
+{
+  "coinName": "Bitcoin",
+  "ticker": "BTC",
+  "blockchain": "Bitcoin",
+  "maxSupply": "21,000,000",
+  "price": "27,000",
+  "communityLink": "https://bitcoin.org",
+  "isHidden": false
+}
