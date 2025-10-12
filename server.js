@@ -11,6 +11,8 @@ import { addRandomTransaction, getTransactionCount } from './transactions.js';
 import { setupLotteryRoutes, addLotteryTransaction, getLotteryTransactionCount } from './lottransactions.js';
 import rewardsRouter from './rewards.js';
 import lotteryRoutes from './routes/lottery.js';
+import payoutRouter from './routes/payout.js';
+
 
 
 const app = express();
@@ -227,6 +229,9 @@ app.get('/coinOfDay', (req, res) => {
 });
 
 
+
+
+app.use('/', payoutRouter);
 
 app.use(cors());
 app.use(express.json());
