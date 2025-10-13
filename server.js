@@ -230,8 +230,8 @@ app.get('/coinOfDay', (req, res) => {
 
 
 
+app.use('/api', payoutRouter);
 
-app.use('/', payoutRouter);
 
 app.use(cors());
 app.use(express.json());
