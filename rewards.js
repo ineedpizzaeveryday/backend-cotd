@@ -8,6 +8,9 @@ import bs58 from 'bs58';
 console.log("Loaded environment variables:");
 console.log("SOLANA_RPC_URL:", process.env.SOLANA_RPC_URL);
 
+
+
+
 const router = express.Router();
 const connection = new Connection(process.env.SOLANA_RPC_URL || 'https://api.devnet.solana.com', 'confirmed');
 
@@ -26,6 +29,9 @@ console.log("Private Key Loaded.");
 // Tworzenie obiektu Keypair na podstawie klucza prywatnego
 const senderKeypair = Keypair.fromSecretKey(bs58.decode(privateKeyBase58));
 
+console.log("Received payout request for:", winnerAddress);
+
+
 // Funkcja do logowania salda
 const logSenderBalance = async () => {
     try {
@@ -40,6 +46,7 @@ const logSenderBalance = async () => {
 
 // Logowanie publicznego klucza nadawcy
 console.log("Sender Public Key:", senderKeypair.publicKey.toBase58());
+
 
 // Logowanie salda
 logSenderBalance();
@@ -74,6 +81,10 @@ router.post('/lottery/payout', async (req, res) => {
         transaction.sign(senderKeypair);
 
         // Wysyłanie transakcji
+
+        const senderBalance = await connection.getBalance(senderKeypair.publicKey);
+console.log("Sender balance (lamports):", senderBalance);
+
         const signature = await connection.sendRawTransaction(transaction.serialize(), {
             skipPreflight: false,
         });
