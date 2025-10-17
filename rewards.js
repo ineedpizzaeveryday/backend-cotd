@@ -1,104 +1,106 @@
 import dotenv from 'dotenv';
 dotenv.config();
-import { Connection, PublicKey, Transaction, SystemProgram, Keypair } from '@solana/web3.js';
 import express from 'express';
 import bs58 from 'bs58';
+import {
+  Connection,
+  PublicKey,
+  Transaction,
+  SystemProgram,
+  Keypair,
+  sendAndConfirmTransaction,
+} from '@solana/web3.js';
 
-// Sprawdzanie, czy zmienne środowiskowe zostały załadowane poprawnie
-console.log("Loaded environment variables:");
+// ================== CONFIG LOGS ==================
+console.log("===========================================");
+console.log("🔧 Loaded environment variables:");
 console.log("SOLANA_RPC_URL:", process.env.SOLANA_RPC_URL);
+console.log("PORT:", process.env.PORT);
+console.log("===========================================");
 
-
-
-
+// ================== CONNECTION ==================
 const router = express.Router();
-const connection = new Connection(process.env.SOLANA_RPC_URL || 'https://api.devnet.solana.com', 'confirmed');
+const connection = new Connection(
+  process.env.SOLANA_RPC_URL || 'https://api.devnet.solana.com',
+  'confirmed'
+);
 
-
-const rewardAmount = 0.05 * 1_000_000_000; // 0.05 SOL
-
+// ================== REWARD WALLET ==================
+const rewardAmountLamports = 0.05 * 1_000_000_000; // 0.05 SOL
 const privateKeyBase58 = process.env.REWARD_WALLET_PRIVATE_KEY;
 
 if (!privateKeyBase58) {
-    throw new Error("REWARD_WALLET_PRIVATE_KEY is not set in environment variables.");
+  throw new Error("❌ REWARD_WALLET_PRIVATE_KEY is not set in environment variables.");
 }
 
-// Logowanie klucza prywatnego po załadowaniu zmiennej środowiskowej
-console.log("Private Key Loaded.");
+let senderKeypair;
+try {
+  const decoded = bs58.decode(privateKeyBase58);
+  senderKeypair = Keypair.fromSecretKey(decoded);
+  console.log("✅ Private Key successfully decoded (Base58).");
+  console.log("💼 Sender Public Key:", senderKeypair.publicKey.toBase58());
+} catch (error) {
+  console.error("❌ Error decoding REWARD_WALLET_PRIVATE_KEY:", error);
+  throw new Error("Invalid Base58 private key in .env");
+}
 
-// Tworzenie obiektu Keypair na podstawie klucza prywatnego
-const senderKeypair = Keypair.fromSecretKey(bs58.decode(privateKeyBase58));
-
-console.log("Received payout request for:", winnerAddress);
-
-
-// Funkcja do logowania salda
+// ================== BALANCE CHECK ==================
 const logSenderBalance = async () => {
-    try {
-        const senderBalance = await connection.getBalance(senderKeypair.publicKey);
-        console.log('Sender Balance:', senderBalance);
-        console.log("SOLANA_RPC_URL:", process.env.SOLANA_RPC_URL);
-
-    } catch (error) {
-        console.error("Error fetching sender balance:", error);
-    }
+  try {
+    const balance = await connection.getBalance(senderKeypair.publicKey);
+    console.log("💰 Sender Balance:", balance / 1e9, "SOL");
+  } catch (error) {
+    console.error("❌ Error fetching sender balance:", error);
+  }
 };
 
-// Logowanie publicznego klucza nadawcy
-console.log("Sender Public Key:", senderKeypair.publicKey.toBase58());
-
-
-// Logowanie salda
 logSenderBalance();
 
-// Endpoint wypłaty nagrody
+// ================== PAYOUT ENDPOINT ==================
 router.post('/lottery/payout', async (req, res) => {
   const { winnerAddress } = req.body;
-  console.log("🔹 Otrzymano żądanie payout dla:", winnerAddress);
+  console.log("🔹 Received payout request for:", winnerAddress);
 
   try {
     if (!winnerAddress) {
-      console.error("❌ Brak adresu odbiorcy!");
+      console.error("❌ Missing winnerAddress in request!");
       return res.status(400).json({ error: 'Missing winnerAddress' });
     }
 
-    const privateKey = process.env.REWARD_WALLET_PRIVATE_KEY;
-    if (!privateKey) {
-      console.error("❌ Brak klucza prywatnego w .env!");
-      return res.status(500).json({ error: 'Private key missing' });
-    }
+    // Double-check connection
+    const conn = new Connection(
+      process.env.SOLANA_RPC_URL || 'https://api.devnet.solana.com',
+      'confirmed'
+    );
 
-    const secret = Uint8Array.from(JSON.parse(privateKey));
-    const sender = Keypair.fromSecretKey(secret);
-    console.log("✅ Załadowano klucz portfela nadawcy:", sender.publicKey.toBase58());
+    // Check sender balance
+    const balance = await conn.getBalance(senderKeypair.publicKey);
+    console.log("💰 Current sender balance:", balance / 1e9, "SOL");
 
-    const connection = new Connection(clusterApiUrl('devnet'), 'confirmed');
-    const balance = await connection.getBalance(sender.publicKey);
-    console.log("💰 Saldo portfela:", balance / 1e9, "SOL");
-
-    if (balance < 0.05 * 1e9) {
-      console.error("❌ Za mało środków w portfelu!");
+    if (balance < rewardAmountLamports) {
+      console.error("❌ Not enough funds in reward wallet!");
       return res.status(500).json({ error: 'Insufficient funds in reward wallet' });
     }
 
+    // Create transaction
     const tx = new Transaction().add(
       SystemProgram.transfer({
-        fromPubkey: sender.publicKey,
+        fromPubkey: senderKeypair.publicKey,
         toPubkey: new PublicKey(winnerAddress),
-        lamports: 0.05 * 1e9,
+        lamports: rewardAmountLamports,
       })
     );
 
-    const signature = await sendAndConfirmTransaction(connection, tx, [sender]);
-    console.log("✅ Wysłano nagrodę! Signature:", signature);
+    console.log("📦 Sending transaction of", rewardAmountLamports / 1e9, "SOL...");
+    const signature = await sendAndConfirmTransaction(conn, tx, [senderKeypair]);
+    console.log("✅ Reward sent successfully! Signature:", signature);
 
     res.json({ success: true, signature });
   } catch (err) {
-    console.error("❌ Błąd podczas wysyłania nagrody:", err);
+    console.error("❌ Error during payout process:", err);
     res.status(500).json({ error: 'Server error', details: err.message });
   }
 });
 
-
-
+// ================== EXPORT ==================
 export default router;
