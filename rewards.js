@@ -53,52 +53,52 @@ logSenderBalance();
 
 // Endpoint wypłaty nagrody
 router.post('/lottery/payout', async (req, res) => {
-    const { winnerAddress } = req.body;
+  const { winnerAddress } = req.body;
+  console.log("🔹 Otrzymano żądanie payout dla:", winnerAddress);
 
+  try {
     if (!winnerAddress) {
-        return res.status(400).json({ success: false, message: 'Winner address is required' });
+      console.error("❌ Brak adresu odbiorcy!");
+      return res.status(400).json({ error: 'Missing winnerAddress' });
     }
 
-    try {
-        const recipientPublicKey = new PublicKey(winnerAddress);
-
-        // Pobranie blockhash
-        const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
-        console.log("Blockhash:", blockhash);
-        console.log("Last valid block height:", lastValidBlockHeight);
-
-        // Tworzenie transakcji
-        const transaction = new Transaction().add(
-            SystemProgram.transfer({
-                fromPubkey: senderKeypair.publicKey,
-                toPubkey: recipientPublicKey,
-                lamports: rewardAmount,
-            })
-        );
-
-        transaction.recentBlockhash = blockhash;
-        transaction.feePayer = senderKeypair.publicKey;
-        transaction.sign(senderKeypair);
-
-        // Wysyłanie transakcji
-
-        const senderBalance = await connection.getBalance(senderKeypair.publicKey);
-console.log("Sender balance (lamports):", senderBalance);
-
-        const signature = await connection.sendRawTransaction(transaction.serialize(), {
-            skipPreflight: false,
-        });
-        console.log("Transaction Signature:", signature);
-
-        // Potwierdzenie transakcji
-        await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, 'confirmed');
-        console.log('Reward sent successfully. TxID:', signature);
-
-        res.json({ success: true, txid: signature });
-    } catch (error) {
-        console.error('Error sending reward:', error);
-        res.status(500).json({ success: false, message: 'Failed to send reward' });
+    const privateKey = process.env.REWARD_WALLET_PRIVATE_KEY;
+    if (!privateKey) {
+      console.error("❌ Brak klucza prywatnego w .env!");
+      return res.status(500).json({ error: 'Private key missing' });
     }
+
+    const secret = Uint8Array.from(JSON.parse(privateKey));
+    const sender = Keypair.fromSecretKey(secret);
+    console.log("✅ Załadowano klucz portfela nadawcy:", sender.publicKey.toBase58());
+
+    const connection = new Connection(clusterApiUrl('devnet'), 'confirmed');
+    const balance = await connection.getBalance(sender.publicKey);
+    console.log("💰 Saldo portfela:", balance / 1e9, "SOL");
+
+    if (balance < 0.05 * 1e9) {
+      console.error("❌ Za mało środków w portfelu!");
+      return res.status(500).json({ error: 'Insufficient funds in reward wallet' });
+    }
+
+    const tx = new Transaction().add(
+      SystemProgram.transfer({
+        fromPubkey: sender.publicKey,
+        toPubkey: new PublicKey(winnerAddress),
+        lamports: 0.05 * 1e9,
+      })
+    );
+
+    const signature = await sendAndConfirmTransaction(connection, tx, [sender]);
+    console.log("✅ Wysłano nagrodę! Signature:", signature);
+
+    res.json({ success: true, signature });
+  } catch (err) {
+    console.error("❌ Błąd podczas wysyłania nagrody:", err);
+    res.status(500).json({ error: 'Server error', details: err.message });
+  }
 });
+
+
 
 export default router;
