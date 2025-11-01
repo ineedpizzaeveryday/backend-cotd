@@ -12,7 +12,20 @@ const PASSWORD = process.env.PRIVATE_KEY_PASSWORD;
 
 if (!PASSWORD) throw new Error("❌ Brak PRIVATE_KEY_PASSWORD w .env");
 
+
+
+
 export function getDecryptedKeypair() {
+  let encrypted;
+  if (process.env.ENCRYPTED_KEY_JSON) {
+    encrypted = JSON.parse(process.env.ENCRYPTED_KEY_JSON);
+  } else {
+    const ENC_FILE = "./src/encrypted_key.json";
+    if (!fs.existsSync(ENC_FILE)) {
+      throw new Error(`❌ Nie znaleziono pliku zaszyfrowanego klucza: ${ENC_FILE}`);
+    }
+    encrypted = JSON.parse(fs.readFileSync(ENC_FILE, "utf8"));
+  }
   if (!fs.existsSync(ENC_FILE)) {
     throw new Error(`❌ Nie znaleziono pliku zaszyfrowanego klucza: ${ENC_FILE}`);
   }
