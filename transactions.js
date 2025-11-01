@@ -2,25 +2,47 @@ import fs from 'fs';
 import path from 'path';
 import sqlite3 from 'sqlite3';
 
-const TRANSACTION_DB_PATH = path.resolve('./transactions.db');
+// 🔹 Plik bazy danych w folderze /data
+const TRANSACTION_DB_PATH = path.resolve('./data/transactions.db');
 
-// Function to initialize the database and create the transactions table if it does not exist
+// 🔹 Upewnij się, że folder 'data' istnieje
+const dataDir = path.dirname(TRANSACTION_DB_PATH);
+if (!fs.existsSync(dataDir)) {
+  fs.mkdirSync(dataDir, { recursive: true });
+  console.log('📁 Utworzono folder /data');
+}
+
+// 🔹 Upewnij się, że plik bazy danych istnieje
+if (!fs.existsSync(TRANSACTION_DB_PATH)) {
+  console.warn('⚠️ Plik transactions.db nie istnieje – tworzę nowy...');
+  fs.writeFileSync(TRANSACTION_DB_PATH, '');
+}
+
+// 🔹 Inicjalizacja bazy danych
 function initializeDatabase() {
   const db = new sqlite3.Database(TRANSACTION_DB_PATH);
-  db.run(`
-    CREATE TABLE IF NOT EXISTS transactions (
+  db.run(
+    `CREATE TABLE IF NOT EXISTS transactions (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       txNumber INTEGER
-    )
-  `, (err) => {
-    if (err) {
-      console.error('Błąd inicjalizacji bazy danych:', err);
-    } else {
-      console.log('Tabela transactions została pomyślnie zainicjalizowana.');
+    )`,
+    (err) => {
+      if (err) {
+        console.error('❌ Błąd inicjalizacji bazy danych:', err);
+      } else {
+        console.log('✅ Tabela transactions została pomyślnie zainicjalizowana.');
+      }
     }
-  });
+  );
   db.close();
 }
+
+initializeDatabase();
+
+
+// 🔹 Uruchom inicjalizację przy starcie
+initializeDatabase();
+
 
 // Call the initialization function when this module is loaded
 initializeDatabase();

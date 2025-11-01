@@ -1,42 +1,34 @@
 // src/backend/routes/payout.js
-import express from 'express';
-import { Connection, Keypair, PublicKey, SystemProgram, Transaction, sendAndConfirmTransaction, LAMPORTS_PER_SOL } from '@solana/web3.js';
-import bs58 from 'bs58';
-import dotenv from 'dotenv';
+import express from "express";
+import { Connection, PublicKey, SystemProgram, Transaction, sendAndConfirmTransaction, LAMPORTS_PER_SOL } from "@solana/web3.js";
+import dotenv from "dotenv";
 dotenv.config();
 
+import { getDecryptedKeypair } from "../secureKey.js";
+
+const payerKeypair = getDecryptedKeypair();
 const router = express.Router();
 
-router.post('/payout', async (req, res) => {
+router.post("/payout", async (req, res) => {
   try {
     const { recipient } = req.body;
-
     if (!recipient) {
-      return res.status(400).json({ error: 'Brak adresu odbiorcy.' });
+      return res.status(400).json({ error: "Brak adresu odbiorcy." });
     }
 
-    const secretKeyBase58 = process.env.REWARD_WALLET_PRIVATE_KEY;
-    if (!secretKeyBase58) {
-      return res.status(500).json({ error: 'Brak klucza prywatnego w .env.' });
-    }
-
-    // 🔐 konwersja z base58
-    const secretKey = bs58.decode(secretKeyBase58);
-    const sender = Keypair.fromSecretKey(secretKey);
-
-    const connection = new Connection(process.env.SOLANA_RPC_URL || 'https://api.devnet.solana.com', 'confirmed');
+    const connection = new Connection(process.env.SOLANA_RPC_URL || "https://api.devnet.solana.com", "confirmed");
     const recipientPubKey = new PublicKey(recipient);
+    const amountLamports = 0.05 * LAMPORTS_PER_SOL;
 
-    // 🔸 Tworzymy transakcję wysyłającą 0.05 SOL
     const tx = new Transaction().add(
       SystemProgram.transfer({
-        fromPubkey: sender.publicKey,
+        fromPubkey: payerKeypair.publicKey,
         toPubkey: recipientPubKey,
-        lamports: 0.05 * LAMPORTS_PER_SOL,
+        lamports: amountLamports,
       })
     );
 
-    const signature = await sendAndConfirmTransaction(connection, tx, [sender]);
+    const signature = await sendAndConfirmTransaction(connection, tx, [payerKeypair]);
 
     console.log(`💸 Wysłano 0.05 SOL do ${recipientPubKey.toBase58()} | tx: ${signature}`);
 
@@ -46,8 +38,8 @@ router.post('/payout', async (req, res) => {
       message: `Wysłano 0.05 SOL do ${recipientPubKey.toBase58()}`,
     });
   } catch (err) {
-    console.error('❌ Błąd payout:', err);
-    res.status(500).json({ error: 'Nie udało się wysłać SOL', details: err.message });
+    console.error("❌ Błąd payout:", err);
+    res.status(500).json({ error: "Nie udało się wysłać SOL", details: err.message });
   }
 });
 

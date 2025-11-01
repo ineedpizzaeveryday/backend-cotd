@@ -10,14 +10,14 @@ import { Connection, PublicKey } from '@solana/web3.js';
 import { addRandomTransaction, getTransactionCount } from './transactions.js';
 import { setupLotteryRoutes, addLotteryTransaction, getLotteryTransactionCount } from './lottransactions.js';
 import rewardsRouter from './rewards.js';
-import lotteryRoutes from './routes/lottery.js';
+import payoutringRouter from './routes/payoutring.js';
+
 import payoutRouter from './routes/payout.js';
-
-
+import { getDecryptedKeypair } from './secureKey.js';
 
 const app = express();
-const dbPath = path.resolve('./data/ranking.db');
-const backupPath = path.resolve('./data/ranking-backup.db');
+const dbPath = path.resolve('./ranking.db');
+const backupPath = path.resolve('./ranking-backup.db');
 
 const PORT = process.env.PORT || 10000;
 
@@ -25,6 +25,9 @@ app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
 });
 
+// 🔐 Odszyfruj klucz prywatny przy starcie serwera
+const keypair = getDecryptedKeypair();
+console.log('💼 Sender Public Key:', keypair.publicKey.toBase58());
 
 // Middleware
 app.use(cors({
@@ -35,10 +38,32 @@ app.use(cors({
 app.use(bodyParser.json());
 app.use('/api', rewardsRouter);
 
+
 // Sprawdź, czy plik bazy danych istnieje
-if (!fs.existsSync(dbPath)) {
-  console.error('Baza danych nie istnieje! Sprawdź konfigurację.');
+// 🧩 Diagnostyka istniejących baz danych
+console.log('🔍 Sprawdzanie baz danych...');
+console.log('Ranking DB path:', dbPath);
+console.log('Backup DB path:', backupPath);
+
+const transactionDbPath = path.resolve('./data/transactions.db');
+const lotTransactionDbPath = path.resolve('./lottransactions.db');
+
+// Sprawdź istnienie plików baz
+const missingDbs = [];
+
+if (!fs.existsSync(dbPath)) missingDbs.push('ranking.db');
+if (!fs.existsSync(transactionDbPath)) missingDbs.push('transactions.db');
+if (!fs.existsSync(lotTransactionDbPath)) missingDbs.push('lottransactions.db');
+
+if (missingDbs.length > 0) {
+  console.error('❌ Brakuje następujących baz danych:', missingDbs.join(', '));
+  console.error('📂 Szukane ścieżki:');
+  console.error(' - ranking.db:', dbPath);
+  console.error(' - transactions.db:', transactionDbPath);
+  console.error(' - lottransactions.db:', lotTransactionDbPath);
   process.exit(1);
+} else {
+  console.log('✅ Wszystkie wymagane bazy danych istnieją.');
 }
 
 // Tworzenie kopii zapasowej bazy danych
@@ -231,16 +256,10 @@ app.get('/coinOfDay', (req, res) => {
 
 
 app.use('/api', payoutRouter);
-
+app.use('/api', payoutringRouter);
 
 app.use(cors());
 app.use(express.json());
-
-app.use('/api/lottery', lotteryRoutes);
-
-app.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
-
-
 
 app.post('/update-coin-visibility', (req, res) => {
   const filePath = path.resolve('./data/coindata.json');

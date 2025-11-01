@@ -11,6 +11,13 @@ import {
   sendAndConfirmTransaction,
 } from '@solana/web3.js';
 
+import { getDecryptedKeypair } from "./secureKey.js";
+
+const senderKeypair = getDecryptedKeypair();
+
+console.log("✅ Reward wallet decrypted successfully.");
+console.log("💼 Sender Public Key:", senderKeypair.publicKey.toBase58());
+
 // ================== CONFIG LOGS ==================
 console.log("===========================================");
 console.log("🔧 Loaded environment variables:");
@@ -27,22 +34,8 @@ const connection = new Connection(
 
 // ================== REWARD WALLET ==================
 const rewardAmountLamports = 0.05 * 1_000_000_000; // 0.05 SOL
-const privateKeyBase58 = process.env.REWARD_WALLET_PRIVATE_KEY;
 
-if (!privateKeyBase58) {
-  throw new Error("❌ REWARD_WALLET_PRIVATE_KEY is not set in environment variables.");
-}
 
-let senderKeypair;
-try {
-  const decoded = bs58.decode(privateKeyBase58);
-  senderKeypair = Keypair.fromSecretKey(decoded);
-  console.log("✅ Private Key successfully decoded (Base58).");
-  console.log("💼 Sender Public Key:", senderKeypair.publicKey.toBase58());
-} catch (error) {
-  console.error("❌ Error decoding REWARD_WALLET_PRIVATE_KEY:", error);
-  throw new Error("Invalid Base58 private key in .env");
-}
 
 // ================== BALANCE CHECK ==================
 const logSenderBalance = async () => {
