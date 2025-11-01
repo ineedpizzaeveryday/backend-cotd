@@ -90,7 +90,7 @@ router.post('/lottery/payout', async (req, res) => {
 
     res.json({ success: true, signature });
   } catch (err) {
-    console.error("❌ Error during payout process:", err);
+    console.error("❌ Error during pAyOuT process:", err);
     res.status(500).json({ error: 'Server error', details: err.message });
   }
 });
