@@ -22,6 +22,10 @@ const backupPath = path.resolve('./ranking-backup.db');
 
 const PORT = process.env.PORT || 10000;
 
+console.log(process.env.SOLANA_RPC_URL)
+
+
+
 app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
 });
