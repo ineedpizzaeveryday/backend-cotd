@@ -12,7 +12,7 @@ dist
 dist-ssr
 *.local
 .env
-encrypted_key.json
+
 
 
 # Editor directories and files
@@ -27,3 +27,4 @@ encrypted_key.json
 *.sw?
 
 .vercel
+

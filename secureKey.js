@@ -13,8 +13,6 @@ const PASSWORD = process.env.PRIVATE_KEY_PASSWORD;
 if (!PASSWORD) throw new Error("❌ Brak PRIVATE_KEY_PASSWORD w .env");
 
 
-
-
 export function getDecryptedKeypair() {
   let encrypted;
   if (process.env.ENCRYPTED_KEY_JSON) {
