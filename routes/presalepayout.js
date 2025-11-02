@@ -19,19 +19,22 @@ import { getDecryptedKeypair } from "../secureKey.js";
 const router = express.Router();
 const payerKeypair = getDecryptedKeypair();
 
-// Adres tokena MNT (później możesz go podać w .env)
-const MNT_TOKEN_MINT = new PublicKey(process.env.MNT_TOKEN_MINT);
-// Przelicznik: 1 SOL = 1000 tokenów
-const TOKENS_PER_SOL = 1000;
+// 🔹 Token mint — możesz ustawić w .env lub zostawić stały
+const MNT_TOKEN_MINT = new PublicKey(
+  process.env.MNT_TOKEN_MINT || "B6QymiRTta3a8hPKGWsUujmwjqmHjALSnN213HM5EM1E"
+);
+
+// 🔹 Przelicznik: 1 SOL = 100 tokenów
+const TOKENS_PER_SOL = 100;
 
 router.post("/presale/payout", async (req, res) => {
   try {
-    const { winnerAddress, amountSOL } = req.body;
+    const { wallet, solAmount } = req.body; // dopasowane do frontendu
 
-    if (!winnerAddress || !amountSOL) {
+    if (!wallet || !solAmount) {
       return res.status(400).json({
         success: false,
-        error: "Brak adresu lub ilości SOL.",
+        error: "Brak adresu portfela lub ilości SOL.",
       });
     }
 
@@ -40,24 +43,23 @@ router.post("/presale/payout", async (req, res) => {
       "confirmed"
     );
 
-    const recipientPubkey = new PublicKey(winnerAddress);
+    const recipientPubkey = new PublicKey(wallet);
 
-    // 🔹 Przelicz ile tokenów wysłać
-    const tokenAmount = amountSOL * TOKENS_PER_SOL * 1_000_000; // zakładamy 6 miejsc po przecinku
+    // 🔹 Przelicz ilość tokenów (6 miejsc po przecinku)
+    const tokenAmount = solAmount * TOKENS_PER_SOL * 1_000_000;
 
-    // Znajdź konto tokenowe odbiorcy
+    // Pobierz adresy kont tokenowych (ATA)
     const recipientATA = await getAssociatedTokenAddress(
       MNT_TOKEN_MINT,
       recipientPubkey
     );
 
-    // Znajdź konto tokenowe nadawcy
     const senderATA = await getAssociatedTokenAddress(
       MNT_TOKEN_MINT,
       payerKeypair.publicKey
     );
 
-    // Stwórz transakcję wysyłającą tokeny MNT
+    // 🔹 Stwórz i podpisz transakcję
     const tx = new Transaction().add(
       createTransferInstruction(
         senderATA,
@@ -69,10 +71,12 @@ router.post("/presale/payout", async (req, res) => {
       )
     );
 
-    const signature = await sendAndConfirmTransaction(connection, tx, [payerKeypair]);
+    const signature = await sendAndConfirmTransaction(connection, tx, [
+      payerKeypair,
+    ]);
 
     console.log(
-      `💰 Presale payout: wysłano ${tokenAmount / 1_000_000} MNT do ${winnerAddress} (tx: ${signature})`
+      `💰 Presale payout: wysłano ${tokenAmount / 1_000_000} MNT do ${wallet} (tx: ${signature})`
     );
 
     res.json({
