@@ -22,9 +22,13 @@ const backupPath = path.resolve('./ranking-backup.db');
 
 const PORT = process.env.PORT || 10000;
 
-console.log(process.env.SOLANA_RPC_URL)
 
 
+app.use(cors({
+  origin: ['https://cotd-one.vercel.app', 'http://localhost:5173'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE'],
+  credentials: true
+}));
 
 app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
@@ -35,11 +39,7 @@ const keypair = getDecryptedKeypair();
 console.log('💼 Sender Public Key:', keypair.publicKey.toBase58());
 
 // Middleware
-app.use(cors({
-  origin: ['https://cotd-one.vercel.app', 'http://localhost:5173'],
-  methods: ['GET', 'POST', 'PUT', 'DELETE'],
-  credentials: true
-}));
+
 app.use(bodyParser.json());
 app.use('/api', rewardsRouter);
 
