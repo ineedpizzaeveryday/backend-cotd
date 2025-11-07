@@ -27,7 +27,7 @@ const MNT_TOKEN_MINT = new PublicKey(
 // 🔹 Przelicznik: 1 SOL = 100 tokenów
 const TOKENS_PER_SOL = 100;
 
-router.post("/payout", async (req, res) => {
+router.post("/presale/payout", async (req, res) => {
   try {
     const { wallet, solAmount } = req.body; // dopasowane do frontendu
 
