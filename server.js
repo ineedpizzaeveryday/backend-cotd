@@ -258,7 +258,7 @@ app.get('/coinOfDay', (req, res) => {
   });
 });
 
-app.use('/api', presalepayoutRouter);
+app.use('/api/presale', presalepayoutRouter);
 app.use('/api', payoutRouter);
 app.use('/api', payoutringRouter);
 
