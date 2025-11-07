@@ -11,7 +11,7 @@ import { addRandomTransaction, getTransactionCount } from './transactions.js';
 import { setupLotteryRoutes, addLotteryTransaction, getLotteryTransactionCount } from './lottransactions.js';
 import rewardsRouter from './rewards.js';
 import payoutringRouter from './routes/payoutring.js';
-import presalepayoutRouter from './routes/presalepayout.js';
+import payoutpresaleRouter from './routes/payoutpresale.js';
 
 import payoutRouter from './routes/payout.js';
 import { getDecryptedKeypair } from './secureKey.js';
@@ -258,7 +258,7 @@ app.get('/coinOfDay', (req, res) => {
   });
 });
 
-app.use('/api/presale', presalepayoutRouter);
+app.use('/api/presale', payoutpresaleRouter);
 app.use('/api', payoutRouter);
 app.use('/api', payoutringRouter);
 
