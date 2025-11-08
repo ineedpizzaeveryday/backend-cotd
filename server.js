@@ -30,10 +30,6 @@ app.use(cors({
   credentials: true
 }));
 
-app.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
-});
-
 // 🔐 Odszyfruj klucz prywatny przy starcie serwera
 const keypair = getDecryptedKeypair();
 console.log('💼 Sender Public Key:', keypair.publicKey.toBase58());
@@ -315,3 +311,6 @@ app.post('/reset-coin-of-day', (req, res) => {
 });
 
 
+app.listen(PORT, () => {
+  console.log(`Server is running on port ${PORT}`);
+});
