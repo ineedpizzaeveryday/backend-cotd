@@ -259,7 +259,7 @@ app.use('/api', payoutRouter);
 app.use('/api', payoutringRouter);
 
 
-app.use(cors());
+
 app.use(express.json());
 
 app.post('/update-coin-visibility', (req, res) => {
