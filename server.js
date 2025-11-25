@@ -30,6 +30,18 @@ app.use(cors({
   credentials: true
 }));
 
+// To wystarczy w 95% przypadków
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', 'https://www.cookingcrypto.org');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+  next();
+});
+
 // 🔐 Odszyfruj klucz prywatny przy starcie serwera
 const keypair = getDecryptedKeypair();
 console.log('💼 Sender Public Key:', keypair.publicKey.toBase58());
