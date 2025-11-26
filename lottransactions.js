@@ -1,17 +1,20 @@
-// lottransactions.js – WERSJA FINALNA, DZIAŁAJĄCA 100%
+// lottransactions.js – WERSJA DZIAŁAJĄCA NA RENDER.COM (i lokalnie)
 
-import fs from 'fs';
 import path from 'path';
 import sqlite3 from 'sqlite3';
 
-// Ścieżka do bazy loterii
-const LOTTERY_DB_PATH = path.resolve('./lottransactions.db');
+// KLUCZOWA ZMIANA – na Renderze baza MUSI być w /data
+const IS_RENDER = process.env.RENDER === 'true';
+const LOTTERY_DB_PATH = IS_RENDER 
+  ? '/data/lottransactions.db' 
+  : path.resolve('./lottransactions.db');
 
-// Inicjalizacja bazy danych przy uruchomieniu modułu
+console.log('Baza loterii będzie w:', LOTTERY_DB_PATH);
+
+// Inicjalizacja bazy
 function initializeLotteryDatabase() {
   const db = new sqlite3.Database(LOTTERY_DB_PATH);
 
-  // Tworzymy tabelę z kolumnami: signature (unikalne), wallet i code
   db.run(`
     CREATE TABLE IF NOT EXISTS lottery_transactions (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -21,114 +24,97 @@ function initializeLotteryDatabase() {
       timestamp INTEGER DEFAULT (strftime('%s', 'now'))
     )
   `, (err) => {
-    if (err) {
-      console.error('Error creating lottery_transactions table:', err);
-    } else {
-      console.log('lottery_transactions table ready.');
-    }
+    if (err) console.error('Błąd tworzenia tabeli:', err);
+    else console.log('Tabela lottery_transactions gotowa');
   });
 
-  // Dodajemy kolumnę wallet jeśli nie istnieje (bezpieczne)
-  db.run(`ALTER TABLE lottery_transactions ADD COLUMN wallet TEXT`, (err) => {
-    if (err && !err.message.includes('duplicate column name')) {
-      console.error('Error adding wallet column:', err);
-    }
-  });
-
-  // Dodajemy kolumnę code jeśli nie istnieje
-  db.run(`ALTER TABLE lottery_transactions ADD COLUMN code TEXT`, (err) => {
-    if (err && !err.message.includes('duplicate column name')) {
-      console.error('Error adding code column:', err);
-    }
-  });
-
-  // Dodajemy kolumnę timestamp jeśli nie istnieje
-  db.run(`ALTER TABLE lottery_transactions ADD COLUMN timestamp INTEGER`, (err) => {
-    if (err && !err.message.includes('duplicate column name')) {
-      console.error('Error adding timestamp column:', err);
-    }
+  // Dodajemy brakujące kolumny (bezpiecznie)
+  ['wallet TEXT', 'code TEXT', 'timestamp INTEGER'].forEach(col => {
+    db.run(`ALTER TABLE lottery_transactions ADD COLUMN ${col.split(' ')[0]} ${col.split(' ')[1]}`, (err) => {
+      if (err && !err.message.includes('duplicate column name')) {
+        console.error('Błąd dodawania kolumny:', err);
+      }
+    });
   });
 
   db.close();
 }
 
-// Uruchamiamy inicjalizację od razu
 initializeLotteryDatabase();
 
-// Generowanie losowego 5-znakowego kodu (np. A7K9M)
+// Generowanie kodu
 const generateRandomCode = () => {
-  const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
   let result = '';
-  for (let i = 0; i < 5; i++) {
-    result += characters.charAt(Math.floor(Math.random() * characters.length));
-  }
+  for (let i = 0; i < 5; i++) result += chars[Math.floor(Math.random() * chars.length)];
   return result;
 };
 
-// GŁÓWNA FUNKCJA – DODAWANIE DO LOTERII (teraz z kodem i walletem!)
-const addLotteryTransaction = (req, res) => {
-  console.log('Lottery join request:', req.body); // ← najważniejsze logi
+// GŁÓWNA FUNKCJA – TERAZ BEZPIECZNA I Z LOGAMI
+export const addLotteryTransaction = (req, res) => {
+  console.log('Lottery add → request:', req.body);
 
   const { signature, wallet } = req.body;
 
   if (!signature || !wallet) {
-    console.log('Brak signature lub wallet!');
+    console.log('Brak danych!');
     return res.status(400).json({ success: false, error: 'Missing signature or wallet' });
   }
 
-  const db = new sqlite3.Database(LOTTERY_DB_PATH);
+  const db = new sqlite3.Database(LOTTERY_DB_PATH, (err) => {
+    if (err) {
+      console.error('Nie można otworzyć bazy loterii!', err);
+      return res.status(500).json({ success: false, error: 'Database connection failed' });
+    }
+  });
 
-  // Sprawdzamy czy transakcja już jest w bazie
+  // Czy już istnieje?
   db.get('SELECT code FROM lottery_transactions WHERE signature = ?', [signature], (err, row) => {
     if (err) {
-    console.error('DB error (select):', err);
+      console.error('Błąd SELECT:', err);
       db.close();
       return res.status(500).json({ success: false });
     }
 
     if (row) {
-      // Już istnieje – zwracamy istniejący kod
-      console.log('Transakcja już dodana. Zwracam kod:', row.code);
+      console.log('Już jest w bazie → zwracam kod:', row.code);
       db.close();
       return res.json({ success: true, code: row.code });
     }
 
-    // Nowa transakcja → generujemy kod i zapisujemy
+    // Nowa transakcja
     const code = generateRandomCode();
 
     db.run(
-      `INSERT INTO lottery_transactions (signature, wallet, code) VALUES (?, ?, ?)`,
+      'INSERT INTO lottery_transactions (signature, wallet, code) VALUES (?, ?, ?)',
       [signature, wallet, code],
       function (err) {
         db.close();
         if (err) {
-          console.error('Błąd zapisu do loterii:', err.message);
-          return res.status(500).json({ success: false, error: 'Database error' });
+          console.error('Błąd INSERT:', err.message);
+          return res.status(500).json({ success: false, error: 'Failed to save' });
         }
-
-        console.log(`Gracz dołączył! Kod: ${code} | Wallet: ${wallet.slice(0, 8)}...`);
+        console.log(`Nowy gracz! Kod: ${code} | ${wallet.slice(0,8)}...`);
         res.json({ success: true, code });
       }
     );
   });
 };
 
-// Licznik uczestników
-const getLotteryTransactionCount = (req, res) => {
-  const db = new sqlite3.Database(LOTTERY_DB_PATH);
-  db.get('SELECT COUNT(*) AS count FROM lottery_transactions', [], (err, row) => {
-    db.close();
+// Licznik
+export const getLotteryTransactionCount = (req, res) => {
+  const db = new sqlite3.Database(LOTTERY_DB_PATH, (err) => {
     if (err) {
-      console.error('Error fetching lottery count:', err);
-      return res.status(500).json({ error: 'Server error' });
+      console.error('Baza niedostępna (count):', err);
+      return res.status(500).json({ error: 'DB error' });
     }
+  });
+
+  db.get('SELECT COUNT(*) AS count FROM lottery_transactions', (err, row) => {
+    db.close();
+    if (err) return res.status(500).json({ error: 'DB error' });
     res.json({ count: row.count || 0 });
   });
 };
 
-// Ta funkcja nie jest już potrzebna (zostawiamy dla kompatybilności, ale nie używamy)
-const setupLotteryRoutes = (app) => {
-  console.warn('setupLotteryRoutes is deprecated – use addLotteryTransaction directly');
-};
-
-export { setupLotteryRoutes, addLotteryTransaction, getLotteryTransactionCount };
+export const setupLotteryRoutes = () => {};
