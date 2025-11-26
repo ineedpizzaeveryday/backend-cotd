@@ -8,7 +8,7 @@ import fs from 'fs';
 import path from 'path';
 import { Connection, PublicKey } from '@solana/web3.js';
 import { addRandomTransaction, getTransactionCount } from './transactions.js';
-import { setupLotteryRoutes, addLotteryTransaction, getLotteryTransactionCount } from './lottransactions.js';
+import {addLotteryTransaction, getLotteryTransactionCount } from './lottransactions.js';
 import rewardsRouter from './rewards.js';
 import payoutringRouter from './routes/payoutring.js';
 import payoutpresaleRouter from './routes/payoutpresale.js';
