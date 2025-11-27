@@ -153,6 +153,7 @@ app.get('/ranking', (req, res) => {
   });
 });
 
+
 app.post('/ranking', (req, res) => {
   const { address, balance, username, shopping = 0 } = req.body;
   if (!address || balance === undefined || !username) {
