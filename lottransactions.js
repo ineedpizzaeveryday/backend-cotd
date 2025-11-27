@@ -1,46 +1,40 @@
-// lottransactions.js – WERSJA DZIAŁAJĄCA NA RENDER.COM (i lokalnie)
-
-import path from 'path';
+// lottransactions.js – WERSJA 100% TRWAŁA (Render + lokalnie)
 import sqlite3 from 'sqlite3';
+import path from 'path';
 
-// KLUCZOWA ZMIANA – na Renderze baza MUSI być w /data
+// KLUCZOWE: stała ścieżka do pliku – zawsze ten sam plik!
 const IS_RENDER = process.env.RENDER === 'true';
-const LOTTERY_DB_PATH = IS_RENDER 
+const DB_PATH = IS_RENDER 
   ? '/data/lottransactions.db' 
-  : path.resolve('./lottransactions.db');
+  : path.join(process.cwd(), 'lottransactions.db');  // <-- ZMIANA!
 
-console.log('Baza loterii będzie w:', LOTTERY_DB_PATH);
+console.log('Baza loterii:', DB_PATH);
 
-// Inicjalizacja bazy
-function initializeLotteryDatabase() {
-  const db = new sqlite3.Database(LOTTERY_DB_PATH);
+// Jedna instancja bazy – nie zamykamy jej nigdy!
+const db = new sqlite3.Database(DB_PATH, sqlite3.OPEN_READWRITE | sqlite3.OPEN_CREATE, (err) => {
+  if (err) {
+    console.error('BŁĄD POŁĄCZENIA Z BAZĄ LOTERII:', err);
+    process.exit(1);
+  } else {
+    console.log('Połączono z bazą loterii:', DB_PATH);
+  }
+});
 
+// Tworzymy tabelę tylko raz
+db.serialize(() => {
   db.run(`
     CREATE TABLE IF NOT EXISTS lottery_transactions (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      signature TEXT UNIQUE,
-      wallet TEXT,
-      code TEXT,
+      signature TEXT UNIQUE NOT NULL,
+      wallet TEXT NOT NULL,
+      code TEXT NOT NULL,
       timestamp INTEGER DEFAULT (strftime('%s', 'now'))
     )
   `, (err) => {
     if (err) console.error('Błąd tworzenia tabeli:', err);
     else console.log('Tabela lottery_transactions gotowa');
   });
-
-  // Dodajemy brakujące kolumny (bezpiecznie)
-  ['wallet TEXT', 'code TEXT', 'timestamp INTEGER'].forEach(col => {
-    db.run(`ALTER TABLE lottery_transactions ADD COLUMN ${col.split(' ')[0]} ${col.split(' ')[1]}`, (err) => {
-      if (err && !err.message.includes('duplicate column name')) {
-        console.error('Błąd dodawania kolumny:', err);
-      }
-    });
-  });
-
-  db.close();
-}
-
-initializeLotteryDatabase();
+});
 
 // Generowanie kodu
 const generateRandomCode = () => {
@@ -50,71 +44,60 @@ const generateRandomCode = () => {
   return result;
 };
 
-// GŁÓWNA FUNKCJA – TERAZ BEZPIECZNA I Z LOGAMI
+// GŁÓWNA FUNKCJA – teraz trwała!
 export const addLotteryTransaction = (req, res) => {
-  console.log('Lottery add → request:', req.body);
-
   const { signature, wallet } = req.body;
 
   if (!signature || !wallet) {
-    console.log('Brak danych!');
-    return res.status(400).json({ success: false, error: 'Missing signature or wallet' });
+    return res.status(400).json({ success: false, error: 'Brak danych' });
   }
 
-  const db = new sqlite3.Database(LOTTERY_DB_PATH, (err) => {
-    if (err) {
-      console.error('Nie można otworzyć bazy loterii!', err);
-      return res.status(500).json({ success: false, error: 'Database connection failed' });
-    }
-  });
-
-  // Czy już istnieje?
+  // Sprawdzamy czy już istnieje
   db.get('SELECT code FROM lottery_transactions WHERE signature = ?', [signature], (err, row) => {
     if (err) {
       console.error('Błąd SELECT:', err);
-      db.close();
-      return res.status(500).json({ success: false });
+      return res.status(500).json({ success: false, error: 'DB error' });
     }
 
     if (row) {
-      console.log('Już jest w bazie → zwracam kod:', row.code);
-      db.close();
+      console.log(`Już istnieje: ${wallet} → ${row.code}`);
       return res.json({ success: true, code: row.code });
     }
 
-    // Nowa transakcja
     const code = generateRandomCode();
 
     db.run(
       'INSERT INTO lottery_transactions (signature, wallet, code) VALUES (?, ?, ?)',
       [signature, wallet, code],
       function (err) {
-        db.close();
         if (err) {
-          console.error('Błąd INSERT:', err.message);
-          return res.status(500).json({ success: false, error: 'Failed to save' });
+          console.error('Błąd INSERT:', err);
+          return res.status(500).json({ success: false, error: 'Zapis nieudany' });
         }
-        console.log(`Nowy gracz! Kod: ${code} | ${wallet.slice(0,8)}...`);
+        console.log(`NOWY LOS: ${code} → ${wallet.slice(0,8)}...`);
         res.json({ success: true, code });
       }
     );
   });
 };
 
-// Licznik
+// Licznik – trwały!
 export const getLotteryTransactionCount = (req, res) => {
-  const db = new sqlite3.Database(LOTTERY_DB_PATH, (err) => {
+  db.get('SELECT COUNT(*) AS count FROM lottery_transactions', (err, row) => {
     if (err) {
-      console.error('Baza niedostępna (count):', err);
+      console.error('Błąd licznika:', err);
       return res.status(500).json({ error: 'DB error' });
     }
-  });
-
-  db.get('SELECT COUNT(*) AS count FROM lottery_transactions', (err, row) => {
-    db.close();
-    if (err) return res.status(500).json({ error: 'DB error' });
     res.json({ count: row.count || 0 });
   });
 };
 
-export const setupLotteryRoutes = () => {};
+// Zabezpieczenie przed zamknięciem bez zapisu
+process.on('SIGINT', () => {
+  console.log('\nZamykanie serwera... zapisuję bazę loterii...');
+  db.close((err) => {
+    if (err) console.error('Błąd zamykania bazy:', err);
+    else console.log('Baza loterii zamknięta bezpiecznie.');
+    process.exit(0);
+  });
+});
