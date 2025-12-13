@@ -1,4 +1,4 @@
-// src/backend/routes/presalepayout.js
+// routes/payoutpresale.js
 import express from "express";
 import {
   Connection,
@@ -10,13 +10,16 @@ import {
   createTransferInstruction,
   createAssociatedTokenAccountInstruction,
   getAssociatedTokenAddress,
-  getAccount,
-  TOKEN_PROGRAM_ID,
 } from "@solana/spl-token";
-import { getDecryptedKeypair } from "../secureKey.js";
+
+import { keypair } from "../server.js"; // gotowy keypair z server.js
 
 const router = express.Router();
-const payerKeypair = getDecryptedKeypair();
+
+const connection = new Connection(
+  process.env.SOLANA_RPC_URL || "https://api.devnet.solana.com",
+  "confirmed"
+);
 
 const MNT_TOKEN_MINT = new PublicKey(
   process.env.MNT_TOKEN_MINT || "B6QymiRTta3a8hPKGWsUujmwjqmHjALSnN213HM5EM1E"
@@ -30,18 +33,13 @@ router.post("/presale/payout", async (req, res) => {
       return res.status(400).json({ success: false, error: "Nieprawidłowe dane" });
     }
 
-    const connection = new Connection(
-      process.env.SOLANA_RPC_URL || "https://api.devnet.solana.com",
-      "confirmed"
-    );
-
     const recipientPubkey = new PublicKey(wallet);
     const tokenAmount = Math.floor(solAmount * TOKENS_PER_SOL * 1_000_000); // 6 decimals
 
-    // ATA nadawcy (zawsze istnieje, bo to Twój portfel)
-    const senderATA = await getAssociatedTokenAddress(MNT_TOKEN_MINT, payerKeypair.publicKey);
+    // ATA nadawcy (zawsze istnieje)
+    const senderATA = await getAssociatedTokenAddress(MNT_TOKEN_MINT, keypair.publicKey);
 
-    // ATA odbiorcy – może nie istnieć!
+    // ATA odbiorcy
     const recipientATA = await getAssociatedTokenAddress(MNT_TOKEN_MINT, recipientPubkey);
 
     const transaction = new Transaction();
@@ -52,10 +50,10 @@ router.post("/presale/payout", async (req, res) => {
       console.log(`ATA nie istnieje dla ${wallet} – tworzę...`);
       transaction.add(
         createAssociatedTokenAccountInstruction(
-          payerKeypair.publicKey,     // payer (Ty płacisz za stworzenie)
-          recipientATA,               // nowe ATA
-          recipientPubkey,            // właściciel
-          MNT_TOKEN_MINT              // mint
+          keypair.publicKey,     // payer
+          recipientATA,          // nowe ATA
+          recipientPubkey,       // właściciel
+          MNT_TOKEN_MINT         // mint
         )
       );
     }
@@ -65,15 +63,13 @@ router.post("/presale/payout", async (req, res) => {
       createTransferInstruction(
         senderATA,
         recipientATA,
-        payerKeypair.publicKey,
+        keypair.publicKey,
         tokenAmount
       )
     );
 
-    // Wysyłka i potwierdzenie
-    const signature = await sendAndConfirmTransaction(connection, transaction, [
-      payerKeypair,
-    ]);
+    // Wysyłka
+    const signature = await sendAndConfirmTransaction(connection, transaction, [keypair]);
 
     console.log(`Presale: ${tokenAmount / 1_000_000} MNT → ${wallet} | Tx: ${signature}`);
 
@@ -83,7 +79,7 @@ router.post("/presale/payout", async (req, res) => {
       tokensSent: tokenAmount / 1_000_000,
     });
   } catch (err) {
-    console.error("Błąd payout:", err);
+    console.error("Błąd presale payout:", err.message);
     res.status(500).json({
       success: false,
       error: "Nie udało się wysłać tokenów",
