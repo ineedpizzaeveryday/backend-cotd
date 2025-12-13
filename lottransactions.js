@@ -1,42 +1,36 @@
-// lottransactions.js – WERSJA 100% TRWAŁA (Render + lokalnie)
+// lottransactions.js
 import sqlite3 from 'sqlite3';
 import path from 'path';
 
-// KLUCZOWE: stała ścieżka do pliku – zawsze ten sam plik!
 const IS_RENDER = process.env.RENDER === 'true';
-const DB_PATH = IS_RENDER 
-  ? '/data/lottransactions.db' 
-  : path.join(process.cwd(), 'lottransactions.db');  // <-- ZMIANA!
+const DB_PATH = IS_RENDER ? '/data/lottransactions.db' : path.resolve('./lottransactions.db');
 
-console.log('Baza loterii:', DB_PATH);
+console.log('📍 Lottery DB path:', DB_PATH);
 
-// Jedna instancja bazy – nie zamykamy jej nigdy!
+// Globalna instancja
 const db = new sqlite3.Database(DB_PATH, sqlite3.OPEN_READWRITE | sqlite3.OPEN_CREATE, (err) => {
   if (err) {
-    console.error('BŁĄD POŁĄCZENIA Z BAZĄ LOTERII:', err);
+    console.error('❌ Błąd połączenia z lottransactions.db:', err);
     process.exit(1);
   } else {
-    console.log('Połączono z bazą loterii:', DB_PATH);
+    console.log('✅ Połączono z lottransactions.db');
   }
 });
 
-// Tworzymy tabelę tylko raz
-db.serialize(() => {
-  db.run(`
-    CREATE TABLE IF NOT EXISTS lottery_transactions (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      signature TEXT UNIQUE NOT NULL,
-      wallet TEXT NOT NULL,
-      code TEXT NOT NULL,
-      timestamp INTEGER DEFAULT (strftime('%s', 'now'))
-    )
-  `, (err) => {
-    if (err) console.error('Błąd tworzenia tabeli:', err);
-    else console.log('Tabela lottery_transactions gotowa');
-  });
+// Tworzenie tabeli
+db.run(`
+  CREATE TABLE IF NOT EXISTS lottery_transactions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    signature TEXT UNIQUE NOT NULL,
+    wallet TEXT NOT NULL,
+    code TEXT NOT NULL,
+    timestamp INTEGER DEFAULT (strftime('%s', 'now'))
+  )
+`, (err) => {
+  if (err) console.error('Błąd tworzenia tabeli lottery_transactions:', err);
+  else console.log('✅ Tabela lottery_transactions gotowa');
 });
 
-// Generowanie kodu
 const generateRandomCode = () => {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
   let result = '';
@@ -44,7 +38,6 @@ const generateRandomCode = () => {
   return result;
 };
 
-// GŁÓWNA FUNKCJA – teraz trwała!
 export const addLotteryTransaction = (req, res) => {
   const { signature, wallet } = req.body;
 
@@ -52,15 +45,13 @@ export const addLotteryTransaction = (req, res) => {
     return res.status(400).json({ success: false, error: 'Brak danych' });
   }
 
-  // Sprawdzamy czy już istnieje
   db.get('SELECT code FROM lottery_transactions WHERE signature = ?', [signature], (err, row) => {
     if (err) {
-      console.error('Błąd SELECT:', err);
+      console.error('Błąd sprawdzania signature:', err);
       return res.status(500).json({ success: false, error: 'DB error' });
     }
 
     if (row) {
-      console.log(`Już istnieje: ${wallet} → ${row.code}`);
       return res.json({ success: true, code: row.code });
     }
 
@@ -71,33 +62,29 @@ export const addLotteryTransaction = (req, res) => {
       [signature, wallet, code],
       function (err) {
         if (err) {
-          console.error('Błąd INSERT:', err);
+          console.error('Błąd INSERT lottery:', err);
           return res.status(500).json({ success: false, error: 'Zapis nieudany' });
         }
-        console.log(`NOWY LOS: ${code} → ${wallet.slice(0,8)}...`);
+        console.log(`🎟 Nowy los: ${code} → ${wallet.slice(0, 8)}...`);
         res.json({ success: true, code });
       }
     );
   });
 };
 
-// Licznik – trwały!
 export const getLotteryTransactionCount = (req, res) => {
   db.get('SELECT COUNT(*) AS count FROM lottery_transactions', (err, row) => {
     if (err) {
-      console.error('Błąd licznika:', err);
+      console.error('Błąd licznika loterii:', err);
       return res.status(500).json({ error: 'DB error' });
     }
     res.json({ count: row.count || 0 });
   });
 };
 
-// Zabezpieczenie przed zamknięciem bez zapisu
 process.on('SIGINT', () => {
-  console.log('\nZamykanie serwera... zapisuję bazę loterii...');
-  db.close((err) => {
-    if (err) console.error('Błąd zamykania bazy:', err);
-    else console.log('Baza loterii zamknięta bezpiecznie.');
+  db.close(() => {
+    console.log('Lottery DB zamknięta');
     process.exit(0);
   });
 });

@@ -1,99 +1,105 @@
-import dotenv from 'dotenv';
-dotenv.config();
+// rewards.js
 import express from 'express';
-import bs58 from 'bs58';
 import {
   Connection,
   PublicKey,
   Transaction,
   SystemProgram,
-  Keypair,
   sendAndConfirmTransaction,
 } from '@solana/web3.js';
 
-import { getDecryptedKeypair } from "./secureKey.js";
+import { keypair } from './server.js'; // Import gotowego keypair z server.js
 
-const senderKeypair = getDecryptedKeypair();
-
-console.log("✅ Reward wallet decrypted successfully.");
-console.log("💼 Sender Public Key:", senderKeypair.publicKey.toBase58());
-
-// ================== CONFIG LOGS ==================
-console.log("===========================================");
-console.log("🔧 Loaded environment variables:");
-console.log("SOLANA_RPC_URL:", process.env.SOLANA_RPC_URL);
-console.log("PORT:", process.env.PORT);
-console.log("===========================================");
-
-// ================== CONNECTION ==================
 const router = express.Router();
+
+// Jedno stałe połączenie – szybsze i bardziej niezawodne
 const connection = new Connection(
-  process.env.SOLANA_RPC_URL || 'https://api.devnet.solana.com',
+  process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com', // zmień na mainnet jeśli produkcja
   'confirmed'
 );
 
-// ================== REWARD WALLET ==================
-const rewardAmountLamports = 0.05 * 1_000_000_000; // 0.05 SOL
+const REWARD_AMOUNT_LAMPORTS = 0.05 * 1_000_000_000; // 0.05 SOL
 
-
-
-// ================== BALANCE CHECK ==================
+// Logowanie salda przy starcie (opcjonalnie – możesz usunąć jeśli nie chcesz)
 const logSenderBalance = async () => {
   try {
-    const balance = await connection.getBalance(senderKeypair.publicKey);
-    console.log("💰 Sender Balance:", balance / 1e9, "SOL");
+    const balance = await connection.getBalance(keypair.publicKey);
+    console.log('💰 Reward wallet balance:', (balance / 1e9).toFixed(4), 'SOL');
   } catch (error) {
-    console.error("❌ Error fetching sender balance:", error);
+    console.error('❌ Błąd sprawdzania salda reward wallet:', error.message);
   }
 };
 
 logSenderBalance();
 
-// ================== PAYOUT ENDPOINT ==================
+// Walidacja adresu Solana
+const isValidSolanaAddress = (address) => {
+  try {
+    new PublicKey(address);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+// ================== ENDPOINT: Wypłata nagrody loteryjnej ==================
 router.post('/lottery/payout', async (req, res) => {
   const { winnerAddress } = req.body;
-  console.log("🔹 Received payout request for:", winnerAddress);
+
+  console.log('🎰 Żądanie wypłaty nagrody dla:', winnerAddress);
+
+  if (!winnerAddress) {
+    return res.status(400).json({ success: false, error: 'Brak adresu zwycięzcy' });
+  }
+
+  if (!isValidSolanaAddress(winnerAddress)) {
+    return res.status(400).json({ success: false, error: 'Nieprawidłowy adres Solana' });
+  }
 
   try {
-    if (!winnerAddress) {
-      console.error("❌ Missing winnerAddress in request!");
-      return res.status(400).json({ error: 'Missing winnerAddress' });
+    // Sprawdź saldo nadawcy
+    const balance = await connection.getBalance(keypair.publicKey);
+    if (balance < REWARD_AMOUNT_LAMPORTS) {
+      console.error('❌ Brak środków w portfelu nagród!');
+      return res.status(500).json({ success: false, error: 'Niewystarczające środki w portfelu nagród' });
     }
 
-    // Double-check connection
-    const conn = new Connection(
-      process.env.SOLANA_RPC_URL || 'https://api.devnet.solana.com',
-      'confirmed'
-    );
-
-    // Check sender balance
-    const balance = await conn.getBalance(senderKeypair.publicKey);
-    console.log("💰 Current sender balance:", balance / 1e9, "SOL");
-
-    if (balance < rewardAmountLamports) {
-      console.error("❌ Not enough funds in reward wallet!");
-      return res.status(500).json({ error: 'Insufficient funds in reward wallet' });
-    }
-
-    // Create transaction
-    const tx = new Transaction().add(
+    // Tworzenie transakcji
+    const transaction = new Transaction().add(
       SystemProgram.transfer({
-        fromPubkey: senderKeypair.publicKey,
+        fromPubkey: keypair.publicKey,
         toPubkey: new PublicKey(winnerAddress),
-        lamports: rewardAmountLamports,
+        lamports: REWARD_AMOUNT_LAMPORTS,
       })
     );
 
-    console.log("📦 Sending transaction of", rewardAmountLamports / 1e9, "SOL...");
-    const signature = await sendAndConfirmTransaction(conn, tx, [senderKeypair]);
-    console.log("✅ Reward sent successfully! Signature:", signature);
+    console.log(`📤 Wysyłanie 0.05 SOL na ${winnerAddress}...`);
 
-    res.json({ success: true, signature });
-  } catch (err) {
-    console.error("❌ Error during pAyOuT process:", err);
-    res.status(500).json({ error: 'Server error', details: err.message });
+    // Wysyłanie i potwierdzenie
+    const signature = await sendAndConfirmTransaction(connection, transaction, [keypair]);
+
+    console.log('✅ Nagroda wypłacona! Signature:', signature);
+
+    return res.json({
+      success: true,
+      signature,
+      amount: 0.05,
+      recipient: winnerAddress,
+    });
+  } catch (error) {
+    console.error('❌ Błąd podczas wypłaty nagrody:', error.message);
+
+    // Lepsze rozróżnienie błędów
+    if (error.message.includes('insufficient funds')) {
+      return res.status(500).json({ success: false, error: 'Niewystarczające środki' });
+    }
+
+    return res.status(500).json({
+      success: false,
+      error: 'Błąd serwera podczas wypłaty',
+      details: error.message,
+    });
   }
 });
 
-// ================== EXPORT ==================
 export default router;

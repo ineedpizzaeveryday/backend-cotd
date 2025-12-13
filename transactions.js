@@ -1,75 +1,69 @@
+// transactions.js
 import fs from 'fs';
 import path from 'path';
 import sqlite3 from 'sqlite3';
 
-// 🔹 Plik bazy danych w folderze /data
-const TRANSACTION_DB_PATH = path.resolve('./data/transactions.db');
+// Ścieżka dostosowana do Render i lokalnie
+const IS_RENDER = process.env.RENDER === 'true';
+const DB_PATH = IS_RENDER ? '/data/transactions.db' : path.resolve('./data/transactions.db');
 
-// 🔹 Upewnij się, że folder 'data' istnieje
-const dataDir = path.dirname(TRANSACTION_DB_PATH);
+console.log('📍 Transactions DB path:', DB_PATH);
+
+// Folder data
+const dataDir = path.dirname(DB_PATH);
 if (!fs.existsSync(dataDir)) {
   fs.mkdirSync(dataDir, { recursive: true });
-  console.log('📁 Utworzono folder /data');
+  console.log('📁 Utworzono folder dla transactions.db');
 }
 
-// 🔹 Upewnij się, że plik bazy danych istnieje
-if (!fs.existsSync(TRANSACTION_DB_PATH)) {
-  console.warn('⚠️ Plik transactions.db nie istnieje – tworzę nowy...');
-  fs.writeFileSync(TRANSACTION_DB_PATH, '');
-}
+// Globalna, trwała instancja bazy
+const db = new sqlite3.Database(DB_PATH, sqlite3.OPEN_READWRITE | sqlite3.OPEN_CREATE, (err) => {
+  if (err) {
+    console.error('❌ Błąd połączenia z transactions.db:', err);
+    process.exit(1);
+  } else {
+    console.log('✅ Połączono z transactions.db');
+  }
+});
 
-// 🔹 Inicjalizacja bazy danych
-function initializeDatabase() {
-  const db = new sqlite3.Database(TRANSACTION_DB_PATH);
-  db.run(
-    `CREATE TABLE IF NOT EXISTS transactions (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      txNumber INTEGER
-    )`,
-    (err) => {
-      if (err) {
-        console.error('❌ Błąd inicjalizacji bazy danych:', err);
-      } else {
-        console.log('✅ Tabela transactions została pomyślnie zainicjalizowana.');
-      }
-    }
-  );
-  db.close();
-}
-
-initializeDatabase();
-
-
-// 🔹 Uruchom inicjalizację przy starcie
-initializeDatabase();
-
-
-// Call the initialization function when this module is loaded
-initializeDatabase();
+// Tworzenie tabeli przy starcie
+db.run(`
+  CREATE TABLE IF NOT EXISTS transactions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    txNumber INTEGER
+  )
+`, (err) => {
+  if (err) console.error('Błąd tworzenia tabeli transactions:', err);
+  else console.log('✅ Tabela transactions gotowa');
+});
 
 export const addRandomTransaction = (req, res) => {
-  const db = new sqlite3.Database(TRANSACTION_DB_PATH);
   const randomTxNumber = Math.floor(Math.random() * 1000000);
-  db.run('INSERT INTO transactions (txNumber) VALUES (?)', [randomTxNumber], (err) => {
+
+  db.run('INSERT INTO transactions (txNumber) VALUES (?)', [randomTxNumber], function (err) {
     if (err) {
       console.error('Błąd dodawania transakcji:', err);
-      res.status(500).json({ error: 'Nie udało się dodać transakcji' });
-    } else {
-      res.json({ success: true });
+      return res.status(500).json({ error: 'Nie udało się dodać transakcji' });
     }
+    res.json({ success: true, id: this.lastID });
   });
-  db.close();
 };
 
 export const getTransactionCount = (req, res) => {
-  const db = new sqlite3.Database(TRANSACTION_DB_PATH);
-  db.get('SELECT COUNT(*) AS count FROM transactions', [], (err, row) => {
+  db.get('SELECT COUNT(*) AS count FROM transactions', (err, row) => {
     if (err) {
       console.error('Błąd pobierania liczby transakcji:', err);
-      res.status(500).json({ error: 'Błąd serwera' });
-    } else {
-      res.json({ count: row.count });
+      return res.status(500).json({ error: 'Błąd serwera' });
     }
+    res.json({ count: row.count || 0 });
   });
-  db.close();
 };
+
+// Opcjonalnie: bezpieczne zamknięcie przy shutdownie
+process.on('SIGINT', () => {
+  db.close((err) => {
+    if (err) console.error('Błąd zamykania transactions.db:', err);
+    else console.log('Transactions DB zamknięta bezpiecznie');
+    process.exit(0);
+  });
+});

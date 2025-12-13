@@ -260,6 +260,8 @@ app.post('/reset-coin-of-day', (req, res) => {
   });
 });
 
+export { keypair, rankingDb };
+
 // ================== START SERWERA ==================
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
