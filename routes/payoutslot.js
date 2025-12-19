@@ -23,7 +23,7 @@ const REWARD_AMOUNT_LAMPORTS = REWARD_AMOUNT_SOL * LAMPORTS_PER_SOL;
   }
 })();
 
-router.post("/", async (req, res) => {
+  router.post("/slot/payout", async (req, res) => {
   const { winnerAddress } = req.body;
 
   console.log("🎰 Żądanie wypłaty dla:", winnerAddress);
