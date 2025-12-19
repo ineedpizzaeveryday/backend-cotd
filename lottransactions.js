@@ -1,17 +1,31 @@
-// lottransactions.js – wersja MongoDB (działa na Render darmowy)
-import { MongoClient } from 'mongodb';
+// lottransactions.js – wersja SQLite (działa na Render bez problemów)
+import sqlite3 from 'sqlite3';
+import path from 'path';
 
-const uri = process.env.MONGODB_URI;
-if (!uri) throw new Error("Brak MONGODB_URI w env!");
+const IS_RENDER = process.env.RENDER === 'true';
+const DB_PATH = IS_RENDER ? '/data/lottery.db' : path.resolve('./lottery.db');
 
-const client = new MongoClient(uri);
-let db;
+console.log('📍 Lottery DB path:', DB_PATH);
 
-client.connect().then(() => {
-  db = client.db(); // domyślna baza z URI
-  console.log("✅ Połączono z MongoDB lottery");
-}).catch(err => {
-  console.error("❌ Błąd połączenia MongoDB:", err);
+const db = new sqlite3.Database(DB_PATH, sqlite3.OPEN_READWRITE | sqlite3.OPEN_CREATE, (err) => {
+  if (err) {
+    console.error('❌ Błąd połączenia z lottery.db:', err);
+  } else {
+    console.log('✅ Połączono z lottery.db');
+  }
+});
+
+db.run(`
+  CREATE TABLE IF NOT EXISTS lottery_transactions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    signature TEXT UNIQUE NOT NULL,
+    wallet TEXT NOT NULL,
+    code TEXT NOT NULL,
+    timestamp INTEGER DEFAULT (strftime('%s', 'now'))
+  )
+`, (err) => {
+  if (err) console.error('Błąd tworzenia tabeli:', err);
+  else console.log('✅ Tabela lottery_transactions gotowa');
 });
 
 const generateRandomCode = () => {
@@ -21,38 +35,46 @@ const generateRandomCode = () => {
   return result;
 };
 
-export const addLotteryTransaction = async (req, res) => {
+export const addLotteryTransaction = (req, res) => {
   const { signature, wallet } = req.body;
-  if (!signature || !wallet) return res.status(400).json({ success: false, error: 'Brak danych' });
 
-  try {
-    const collection = db.collection('lottery_transactions');
-    const existing = await collection.findOne({ signature });
-    if (existing) return res.json({ success: true, code: existing.code });
+  if (!signature || !wallet) {
+    return res.status(400).json({ success: false, error: 'Brak danych' });
+  }
+
+  db.get('SELECT code FROM lottery_transactions WHERE signature = ?', [signature], (err, row) => {
+    if (err) {
+      console.error('Błąd sprawdzania signature:', err);
+      return res.status(500).json({ success: false, error: 'DB error' });
+    }
+
+    if (row) {
+      return res.json({ success: true, code: row.code });
+    }
 
     const code = generateRandomCode();
-    await collection.insertOne({
-      signature,
-      wallet,
-      code,
-      timestamp: new Date()
-    });
 
-    console.log(`🎟 Nowy los: ${code} → ${wallet.slice(0,8)}...`);
-    res.json({ success: true, code });
-  } catch (err) {
-    console.error('Błąd MongoDB add:', err);
-    res.status(500).json({ success: false, error: 'DB error' });
-  }
+    db.run(
+      'INSERT INTO lottery_transactions (signature, wallet, code) VALUES (?, ?, ?)',
+      [signature, wallet, code],
+      function (err) {
+        if (err) {
+          console.error('Błąd INSERT lottery:', err);
+          return res.status(500).json({ success: false, error: 'Zapis nieudany' });
+        }
+        console.log(`🎟 Nowy los: ${code} → ${wallet.slice(0, 8)}...`);
+        res.json({ success: true, code });
+      }
+    );
+  });
 };
 
-export const getLotteryTransactionCount = async (req, res) => {
-  try {
-    const collection = db.collection('lottery_transactions');
-    const count = await collection.countDocuments();
-    res.json({ count });
-  } catch (err) {
-    console.error('Błąd MongoDB count:', err);
-    res.status(500).json({ error: 'DB error' });
-  }
+export const getLotteryTransactionCount = (req, res) => {
+  db.get('SELECT COUNT(*) AS count FROM lottery_transactions', (err, row) => {
+    if (err) {
+      console.error('Błąd licznika loterii:', err);
+      return res.status(500).json({ error: 'DB error' });
+    }
+    res.json({ count: row.count || 0 });
+  });
 };
