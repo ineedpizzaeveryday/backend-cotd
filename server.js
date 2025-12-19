@@ -9,7 +9,6 @@ import { Connection, PublicKey } from '@solana/web3.js';
 
 import { addRandomTransaction, getTransactionCount } from './transactions.js';
 import { addLotteryTransaction, getLotteryTransactionCount } from './lottransactions.js';
-import rewardsRouter from './rewards.js';
 import payoutRingRouter from './routes/payoutring.js';
 import payoutPresaleRouter from './routes/payoutpresale.js';
 import payoutRouter from './routes/payout.js';
@@ -78,7 +77,7 @@ app.use(express.json()); // Tylko raz, na początku!
 // Routery z konkretnymi prefixami (unikamy konfliktów)
 app.use('/api/rewards', rewardsRouter);
 app.use('/api/payoutpresale', payoutPresaleRouter);
-app.use('/api/payout', payoutRouter);
+app.use('/api/lottery/payout', payoutRouter);
 app.use('/api/payoutring', payoutRingRouter);
 
 // ================== FUNKCJE POMOCNICZE ==================

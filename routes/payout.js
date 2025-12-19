@@ -1,7 +1,7 @@
-// routes/payout.js
+// routes/payout.js – wersja z logami i lepszymi błędami
 import express from "express";
-import { Connection, PublicKey, SystemProgram, Transaction, sendAndConfirmTransaction, LAMPORTS_PER_SOL } from "@solana/web3.js";
-import { keypair } from "../server.js"; // gotowy keypair z server.js
+import { Connection, PublicKey, Transaction, SystemProgram, sendAndConfirmTransaction, LAMPORTS_PER_SOL } from "@solana/web3.js";
+import { keypair } from "../server.js";
 
 const router = express.Router();
 
@@ -10,36 +10,66 @@ const connection = new Connection(
   "confirmed"
 );
 
-router.post("/payout", async (req, res) => {
+const REWARD_AMOUNT_SOL = 0.05;
+const REWARD_AMOUNT_LAMPORTS = REWARD_AMOUNT_SOL * LAMPORTS_PER_SOL;
+
+// Log salda przy starcie
+(async () => {
   try {
-    const { recipient } = req.body;
-    if (!recipient) {
-      return res.status(400).json({ error: "Brak adresu odbiorcy." });
+    const balance = await connection.getBalance(keypair.publicKey);
+    console.log(`💰 Reward wallet (${keypair.publicKey.toBase58()}) balance: ${(balance / LAMPORTS_PER_SOL).toFixed(4)} SOL`);
+  } catch (err) {
+    console.error("❌ Nie udało się sprawdzić salda reward wallet");
+  }
+})();
+
+router.post("/", async (req, res) => {
+  const { winnerAddress } = req.body;
+
+  console.log("🎰 Żądanie wypłaty dla:", winnerAddress);
+
+  if (!winnerAddress) {
+    return res.status(400).json({ success: false, error: "Brak adresu zwycięzcy" });
+  }
+
+  let recipientPubKey;
+  try {
+    recipientPubKey = new PublicKey(winnerAddress);
+  } catch {
+    return res.status(400).json({ success: false, error: "Nieprawidłowy adres Solana" });
+  }
+
+  try {
+    // Sprawdź saldo
+    const balance = await connection.getBalance(keypair.publicKey);
+    console.log(`Aktualne saldo reward wallet: ${(balance / LAMPORTS_PER_SOL).toFixed(4)} SOL`);
+
+    if (balance < REWARD_AMOUNT_LAMPORTS + 0.001 * LAMPORTS_PER_SOL) { // + fee
+      console.error("❌ Brak środków na wypłatę nagrody!");
+      return res.status(500).json({ success: false, error: "No funds on reward wallet" });
     }
 
-    const recipientPubKey = new PublicKey(recipient);
-    const amountLamports = 0.05 * LAMPORTS_PER_SOL;
-
-    const tx = new Transaction().add(
+    const transaction = new Transaction().add(
       SystemProgram.transfer({
         fromPubkey: keypair.publicKey,
         toPubkey: recipientPubKey,
-        lamports: amountLamports,
+        lamports: REWARD_AMOUNT_LAMPORTS,
       })
     );
 
-    const signature = await sendAndConfirmTransaction(connection, tx, [keypair]);
+    const signature = await sendAndConfirmTransaction(connection, transaction, [keypair]);
 
-    console.log(`💸 Wysłano 0.05 SOL do ${recipientPubKey.toBase58()} | tx: ${signature}`);
+    console.log(`✅ Wypłata 0.05 SOL do ${winnerAddress} | Tx: ${signature}`);
 
-    res.json({
-      success: true,
-      tx: signature,
-      message: `Wysłano 0.05 SOL do ${recipientPubKey.toBase58()}`,
-    });
+    res.json({ success: true, txid: signature });
   } catch (err) {
     console.error("❌ Błąd payout:", err.message);
-    res.status(500).json({ error: "Nie udało się wysłać SOL", details: err.message });
+
+    if (err.message.includes("insufficient funds")) {
+      return res.status(500).json({ success: false, error: "No funds on reward wallet" });
+    }
+
+    res.status(500).json({ success: false, error: "Payout failed", details: err.message });
   }
 });
 
