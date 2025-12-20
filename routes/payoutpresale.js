@@ -1,4 +1,4 @@
-// routes/payoutpresale.js – finalna wersja z logami i fixem ATA
+// routes/payoutpresale.js – wersja z fallback RPC, retry blockhash i logami
 import express from "express";
 import {
   Connection,
@@ -16,16 +16,51 @@ import { keypair } from "../server.js";
 
 const router = express.Router();
 
-const connection = new Connection(
-  process.env.SOLANA_RPC_URL || "https://rpc.hellomoon.io",
-  "confirmed"
-);
+// Najlepsze darmowe RPC w 2025 – fallback w razie problemów
+const RPC_URLS = [
+  "https://rpc.ankr.com/solana",                    // 1. Najlepszy – szybki i stabilny
+  "https://solana-api.projectserum.com",            // 2. Klasyka, zawsze działa
+  "https://mainnet.helius-rpc.com/?api-key=public", // 3. Helius public
+  "https://api.mainnet-beta.solana.com",            // 4. Oficjalny (ostatni fallback)
+];
 
-// Twój mint $INSTANT – ZMIEŃ JEŚLI INNY
+let connection;
+
+// Funkcja tworząca connection z fallback
+const createConnection = () => {
+  for (const url of RPC_URLS) {
+    try {
+      const conn = new Connection(url, "confirmed");
+      console.log(`✅ Połączono z RPC: ${url}`);
+      return conn;
+    } catch (err) {
+      console.warn(`RPC ${url} niedostępny – próbuję następny`);
+    }
+  }
+  throw new Error("Wszystkie RPC niedostępne");
+};
+
+connection = createConnection();
+
+// Mint $INSTANT – ZMIEŃ JEŚLI INNY
 const MNT_TOKEN_MINT = new PublicKey("DWPLeuggJtGAJ4dGLXnH94653f1xGE1Nf9TVyyiR5U35");
 
 // Cena presale – dostosuj
 const TOKENS_PER_SOL = 500000; // 1 SOL = 500 000 tokenów
+
+// Retry na blockhash (rozwiązuje 400 Bad Request)
+const getBlockhashWithRetry = async (retries = 5) => {
+  for (let i = 0; i < retries; i++) {
+    try {
+      const { blockhash } = await connection.getLatestBlockhash("confirmed");
+      return blockhash;
+    } catch (err) {
+      console.log(`Retry blockhash ${i + 1}/${retries}...`);
+      await new Promise(r => setTimeout(r, 1000 * (i + 1)));
+    }
+  }
+  throw new Error("Nie udało się pobrać blockhash po retry");
+};
 
 router.post("/", async (req, res) => {
   console.log("🎰 PRESALE PAYOUT – request received");
@@ -34,7 +69,7 @@ router.post("/", async (req, res) => {
   const { wallet, solAmount } = req.body;
 
   if (!wallet || !solAmount || solAmount <= 0) {
-    console.log("❌ Brak danych lub zły solAmount");
+    console.log("❌ Brak danych");
     return res.status(400).json({ success: false, error: "Brak wallet lub solAmount" });
   }
 
@@ -43,36 +78,32 @@ router.post("/", async (req, res) => {
     recipientPubkey = new PublicKey(wallet);
     console.log("✅ Odbiorca:", recipientPubkey.toBase58());
   } catch {
-    console.log("❌ Nieprawidłowy adres odbiorcy");
-    return res.status(400).json({ success: false, error: "Nieprawidłowy adres Solana" });
+    return res.status(400).json({ success: false, error: "Nieprawidłowy adres" });
   }
 
   const tokenAmount = Math.floor(solAmount * TOKENS_PER_SOL);
   console.log(`📤 Wysyłka: ${tokenAmount} tokenów za ${solAmount} SOL`);
 
   try {
-    // ATA nadawcy (reward wallet)
     const senderATA = await getAssociatedTokenAddress(MNT_TOKEN_MINT, keypair.publicKey);
-    console.log("Sender ATA:", senderATA.toBase58());
-
-    // ATA odbiorcy
     const recipientATA = await getAssociatedTokenAddress(MNT_TOKEN_MINT, recipientPubkey);
+
+    console.log("Sender ATA:", senderATA.toBase58());
     console.log("Recipient ATA:", recipientATA.toBase58());
 
     const transaction = new Transaction();
 
-    // ZAWSZE dodajemy create ATA – to idempotentne i bezpieczne
-    console.log("Dodajemy create ATA dla odbiorcy (jeśli nie istnieje)");
+    // ZAWSZE create ATA – idempotentne, bezpieczne
     transaction.add(
       createAssociatedTokenAccountInstruction(
-        keypair.publicKey,     // payer = reward wallet
-        recipientATA,          // nowe ATA
-        recipientPubkey,       // właściciel
+        keypair.publicKey,
+        recipientATA,
+        recipientPubkey,
         MNT_TOKEN_MINT
       )
     );
 
-    // Transfer tokenów
+    // Transfer
     transaction.add(
       createTransferInstruction(
         senderATA,
@@ -82,7 +113,12 @@ router.post("/", async (req, res) => {
       )
     );
 
-    console.log("📤 Wysyłanie transakcji payout...");
+    // Pobieramy blockhash z retry
+    const blockhash = await getBlockhashWithRetry();
+    transaction.recentBlockhash = blockhash;
+    transaction.feePayer = keypair.publicKey;
+
+    console.log("📤 Wysyłanie transakcji...");
     const signature = await sendAndConfirmTransaction(connection, transaction, [keypair]);
 
     console.log(`✅ Presale payout SUKCES! Tx: ${signature}`);
