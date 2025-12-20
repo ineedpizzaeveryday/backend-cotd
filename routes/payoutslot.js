@@ -6,7 +6,7 @@ import { keypair } from "../server.js";
 const router = express.Router();
 
 const connection = new Connection(
-  process.env.SOLANA_RPC_URL || "https://api.devnet.solana.com",
+  process.env.SOLANA_RPC_URL || "https://rpc.hellomoon.io",
   "confirmed"
 );
 

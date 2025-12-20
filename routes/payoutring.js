@@ -6,9 +6,7 @@ import { keypair } from "../server.js"; // gotowy keypair
 const router = express.Router();
 
 const connection = new Connection(
-  process.env.SOLANA_RPC_URL || "https://api.devnet.solana.com",
-  "confirmed"
-);
+  process.env.SOLANA_RPC_URL || "https://rpc.hellomoon.io",  "confirmed");
 
 router.post("/ring/payout", async (req, res) => {
   try {

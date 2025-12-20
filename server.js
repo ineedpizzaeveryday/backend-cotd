@@ -168,7 +168,7 @@ app.post('/shopping', (req, res) => {
 });
 
 app.post('/refresh-balances', async (req, res) => {
-  const connection = new Connection(process.env.SOLANA_RPC_URL || 'https://api.devnet.solana.com');
+  const connection = new Connection(process.env.SOLANA_RPC_URL || 'https://rpc.hellomoon.io');
 
   rankingDb.all('SELECT address, shopping FROM ranking', async (err, rows) => {
     if (err) return res.status(500).json({ error: 'Błąd odczytu bazy' });
