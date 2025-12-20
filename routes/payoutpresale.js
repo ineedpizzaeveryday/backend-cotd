@@ -18,10 +18,11 @@ const router = express.Router();
 
 // Najlepsze darmowe RPC w 2025 – fallback w razie problemów
 const RPC_URLS = [
-  "https://rpc.ankr.com/solana",                    // 1. Najlepszy – szybki i stabilny
-  "https://solana-api.projectserum.com",            // 2. Klasyka, zawsze działa
-  "https://mainnet.helius-rpc.com/?api-key=public", // 3. Helius public
-  "https://api.mainnet-beta.solana.com",            // 4. Oficjalny (ostatni fallback)
+  "https://rpc.ankr.com/solana",
+  "https://solana-api.projectserum.com",
+  "https://api.mainnet-beta.solana.com",
+  "https://solana-mainnet.g.alchemy.com/v2/demo", // Alchemy public
+  "https://mainnet.helius-rpc.com/?api-key=20197e39-1d7d-4b77-b6a5-6594c59b0b46"
 ];
 
 let connection;
