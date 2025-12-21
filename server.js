@@ -1,6 +1,7 @@
 import dotenv from 'dotenv';
 dotenv.config();
 
+const IS_RENDER = process.env.RENDER === 'true';
 import express from 'express';                // ← DODANE!
 import cors from 'cors';
 import fs from 'fs';
@@ -257,6 +258,8 @@ app.post('/reset-coin-of-day', (req, res) => {
 // Baza odblokowanych użytkowników Coin of the Day – trwała na Render (/data)
 const UNLOCKED_DB_PATH = IS_RENDER ? '/data/unlocked_coin.db' : path.resolve('./data/unlocked_coin.db');
 
+console.log('📍 Unlocked Coin DB path:', UNLOCKED_DB_PATH);
+
 if (!fs.existsSync(path.dirname(UNLOCKED_DB_PATH))) {
   fs.mkdirSync(path.dirname(UNLOCKED_DB_PATH), { recursive: true });
 }
@@ -275,7 +278,11 @@ unlockedDb.run(`
     unlocked_at DATETIME DEFAULT CURRENT_TIMESTAMP
   )
 `, (err) => {
-  if (err) console.error('Błąd tabeli unlocked_users:', err);
+  if (err) {
+    console.error('Błąd tworzenia tabeli unlocked_users:', err);
+  } else {
+    console.log('✅ Tabela unlocked_users gotowa');
+  }
 });
 
 // Sprawdza czy dany address już odblokował Coin of the Day
