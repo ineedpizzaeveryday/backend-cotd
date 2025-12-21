@@ -10,7 +10,7 @@ import {
   createTransferInstruction,
   createAssociatedTokenAccountInstruction,
   getAssociatedTokenAddress,
-  getAccount, // <--- nowe: do sprawdzania czy ATA istnieje
+  getAccount,
   TOKEN_2022_PROGRAM_ID,
 } from "@solana/spl-token";
 
@@ -44,13 +44,11 @@ const createConnection = () => {
 
 connection = createConnection();
 
-// Mint $INSTANT (Token-2022 z Immutable Owner)
+// Mint $INSTANT (Token-2022)
 const MNT_TOKEN_MINT = new PublicKey("DWPLeuggJtGAJ4dGLXnH94653f1xGE1Nf9TVyyiR5U35");
 
-// 1 SOL = 500 000 tokenów
+// Phase 1 – poprawna cena
 const TOKENS_PER_SOL = 1_176_470;
-
-console.log(`Wysyłka: ${tokenAmount} tokenów (${(tokenAmount / 1_000_000).toFixed(3)}M) za ${solAmount} SOL`);
 
 // Retry blockhash
 const getBlockhashWithRetry = async (retries = 10) => {
@@ -84,11 +82,13 @@ router.post("/", async (req, res) => {
     return res.status(400).json({ success: false, error: "Nieprawidłowy adres" });
   }
 
+  // Obliczamy tokeny
   const tokenAmount = Math.floor(solAmount * TOKENS_PER_SOL);
-  console.log(`📤 Wysyłka: ${tokenAmount} tokenów za ${solAmount} SOL`);
+
+  // Log dopiero tutaj – po obliczeniu
+  console.log(`📤 Wysyłka: ${tokenAmount.toLocaleString()} tokenów (${(tokenAmount / 1_000_000).toFixed(3)}M) za ${solAmount} SOL`);
 
   try {
-    // Sender ATA (twoje wallet – zakładamy, że istnieje)
     const senderATA = await getAssociatedTokenAddress(
       MNT_TOKEN_MINT,
       keypair.publicKey,
@@ -96,11 +96,10 @@ router.post("/", async (req, res) => {
       TOKEN_2022_PROGRAM_ID
     );
 
-    // Recipient ATA – z allowOwnerOffCurve = true (kluczowe dla Immutable Owner)
     const recipientATA = await getAssociatedTokenAddress(
       MNT_TOKEN_MINT,
       recipientPubkey,
-      true, // <--- allowOwnerOffCurve = true
+      true,
       TOKEN_2022_PROGRAM_ID
     );
 
@@ -109,25 +108,23 @@ router.post("/", async (req, res) => {
 
     const transaction = new Transaction();
 
-    // Sprawdzamy czy recipient ATA już istnieje – jeśli tak, nie dodajemy create (bezpieczniej)
-    let recipientAccount;
+    // Create ATA jeśli nie istnieje
     try {
-      recipientAccount = await getAccount(connection, recipientATA, "confirmed", TOKEN_2022_PROGRAM_ID);
+      await getAccount(connection, recipientATA, "confirmed", TOKEN_2022_PROGRAM_ID);
       console.log("Recipient ATA już istnieje – pomijamy create");
     } catch (err) {
-      // Nie istnieje – dodajemy create ATA
       transaction.add(
         createAssociatedTokenAccountInstruction(
-          keypair.publicKey,       // payer
-          recipientATA,            // ata
-          recipientPubkey,         // owner
-          MNT_TOKEN_MINT,          // mint
-          TOKEN_2022_PROGRAM_ID,   // programId
-          undefined,               // associatedTokenProgramId (domyślny)
-          true                     // allowOwnerOffCurve – opcjonalny, ale dla pewności
+          keypair.publicKey,
+          recipientATA,
+          recipientPubkey,
+          MNT_TOKEN_MINT,
+          TOKEN_2022_PROGRAM_ID,
+          undefined,
+          true
         )
       );
-      console.log("Dodano instrukcję create ATA dla recipient");
+      console.log("Dodano create ATA");
     }
 
     // Transfer
@@ -142,7 +139,6 @@ router.post("/", async (req, res) => {
       )
     );
 
-    // Blockhash
     const blockhash = await getBlockhashWithRetry();
     transaction.recentBlockhash = blockhash;
     transaction.feePayer = keypair.publicKey;
@@ -159,13 +155,7 @@ router.post("/", async (req, res) => {
     });
   } catch (err) {
     console.error("❌ Błąd payout:", err.message);
-    if (err.logs) {
-      console.error("Transaction logs:", err.logs);
-    }
-
-    if (err.message.includes("insufficient funds")) {
-      return res.status(500).json({ success: false, error: "Brak tokenów w reward wallet" });
-    }
+    if (err.logs) console.error("Logs:", err.logs);
 
     res.status(500).json({
       success: false,
