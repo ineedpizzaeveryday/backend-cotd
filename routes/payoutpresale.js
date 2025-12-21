@@ -1,4 +1,4 @@
-// routes/payoutpresale.js – wersja z fallback RPC, retry blockhash i logami
+// routes/payoutpresale.js – wersja poprawiona dla Token-2022
 import express from "express";
 import {
   Connection,
@@ -10,6 +10,7 @@ import {
   createTransferInstruction,
   createAssociatedTokenAccountInstruction,
   getAssociatedTokenAddress,
+  TOKEN_2022_PROGRAM_ID, // <--- kluczowa stała dla Token-2022
 } from "@solana/spl-token";
 
 import { keypair } from "../server.js";
@@ -22,8 +23,7 @@ const RPC_URLS = [
   "https://rpc.ankr.com/solana",
   "https://solana-api.projectserum.com",
   "https://api.mainnet-beta.solana.com",
-  "https://solana-mainnet.g.alchemy.com/v2/demo", // Alchemy public
-  
+  "https://solana-mainnet.g.alchemy.com/v2/demo",
 ];
 
 let connection;
@@ -44,13 +44,13 @@ const createConnection = () => {
 
 connection = createConnection();
 
-// Mint $INSTANT – ZMIEŃ JEŚLI INNY
+// Mint tokena – Token-2022
 const MNT_TOKEN_MINT = new PublicKey("DWPLeuggJtGAJ4dGLXnH94653f1xGE1Nf9TVyyiR5U35");
 
-// Cena presale – dostosuj
+// Cena presale
 const TOKENS_PER_SOL = 500000; // 1 SOL = 500 000 tokenów
 
-// Retry na blockhash (rozwiązuje 400 Bad Request)
+// Retry na blockhash
 const getBlockhashWithRetry = async (retries = 10) => {
   for (let i = 0; i < retries; i++) {
     try {
@@ -58,7 +58,7 @@ const getBlockhashWithRetry = async (retries = 10) => {
       return blockhash;
     } catch (err) {
       console.log(`Retry blockhash ${i + 1}/${retries}...`);
-      await new Promise(r => setTimeout(r, 2000 * (i + 1))); // rosnące opóźnienie
+      await new Promise(r => setTimeout(r, 2000 * (i + 1)));
     }
   }
   throw new Error("Nie udało się pobrać blockhash po retry");
@@ -71,7 +71,6 @@ router.post("/", async (req, res) => {
   const { wallet, solAmount } = req.body;
 
   if (!wallet || !solAmount || solAmount <= 0) {
-    console.log("❌ Brak danych");
     return res.status(400).json({ success: false, error: "Brak wallet lub solAmount" });
   }
 
@@ -87,35 +86,50 @@ router.post("/", async (req, res) => {
   console.log(`📤 Wysyłka: ${tokenAmount} tokenów za ${solAmount} SOL`);
 
   try {
-    const senderATA = await getAssociatedTokenAddress(MNT_TOKEN_MINT, keypair.publicKey);
-    const recipientATA = await getAssociatedTokenAddress(MNT_TOKEN_MINT, recipientPubkey);
+    // ATA z Token-2022 program ID
+    const senderATA = await getAssociatedTokenAddress(
+      MNT_TOKEN_MINT,
+      keypair.publicKey,
+      false,
+      TOKEN_2022_PROGRAM_ID
+    );
+
+    const recipientATA = await getAssociatedTokenAddress(
+      MNT_TOKEN_MINT,
+      recipientPubkey,
+      false,
+      TOKEN_2022_PROGRAM_ID
+    );
 
     console.log("Sender ATA:", senderATA.toBase58());
     console.log("Recipient ATA:", recipientATA.toBase58());
 
     const transaction = new Transaction();
 
-    // ZAWSZE create ATA – idempotentne, bezpieczne
+    // Create ATA (idempotentne) – z Token-2022
     transaction.add(
       createAssociatedTokenAccountInstruction(
-        keypair.publicKey,
-        recipientATA,
-        recipientPubkey,
-        MNT_TOKEN_MINT
+        keypair.publicKey,       // payer
+        recipientATA,            // associated token account
+        recipientPubkey,         // owner
+        MNT_TOKEN_MINT,          // mint
+        TOKEN_2022_PROGRAM_ID    // <--- kluczowe
       )
     );
 
-    // Transfer
+    // Transfer – z Token-2022
     transaction.add(
       createTransferInstruction(
         senderATA,
         recipientATA,
         keypair.publicKey,
-        BigInt(tokenAmount)
+        BigInt(tokenAmount),
+        [],                      // multi signers (niepotrzebne)
+        TOKEN_2022_PROGRAM_ID    // <--- kluczowe
       )
     );
 
-    // Pobieramy blockhash z retry
+    // Blockhash z retry
     const blockhash = await getBlockhashWithRetry();
     transaction.recentBlockhash = blockhash;
     transaction.feePayer = keypair.publicKey;
@@ -132,10 +146,19 @@ router.post("/", async (req, res) => {
     });
   } catch (err) {
     console.error("❌ Błąd payout:", err.message);
+    if (err.logs) {
+      console.error("Transaction logs:", err.logs);
+    }
+
     if (err.message.includes("insufficient funds")) {
       return res.status(500).json({ success: false, error: "Brak tokenów w reward wallet" });
     }
-    res.status(500).json({ success: false, error: "Payout failed", details: err.message });
+
+    res.status(500).json({
+      success: false,
+      error: "Payout failed",
+      details: err.message,
+    });
   }
 });
 
