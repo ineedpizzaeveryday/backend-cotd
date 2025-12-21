@@ -254,6 +254,64 @@ app.post('/reset-coin-of-day', (req, res) => {
   });
 });
 
+// Baza odblokowanych użytkowników Coin of the Day – trwała na Render (/data)
+const UNLOCKED_DB_PATH = IS_RENDER ? '/data/unlocked_coin.db' : path.resolve('./data/unlocked_coin.db');
+
+if (!fs.existsSync(path.dirname(UNLOCKED_DB_PATH))) {
+  fs.mkdirSync(path.dirname(UNLOCKED_DB_PATH), { recursive: true });
+}
+
+const unlockedDb = new sqlite3.Database(UNLOCKED_DB_PATH, (err) => {
+  if (err) {
+    console.error('Błąd unlocked_coin.db:', err);
+  } else {
+    console.log('✅ Połączono z unlocked_coin.db');
+  }
+});
+
+unlockedDb.run(`
+  CREATE TABLE IF NOT EXISTS unlocked_users (
+    address TEXT PRIMARY KEY,
+    unlocked_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )
+`, (err) => {
+  if (err) console.error('Błąd tabeli unlocked_users:', err);
+});
+
+// Sprawdza czy dany address już odblokował Coin of the Day
+app.get('/api/is-coin-unlocked', (req, res) => {
+  const { address } = req.query;
+  if (!address || !isValidSolanaAddress(address)) {
+    return res.status(400).json({ unlocked: false });
+  }
+
+  unlockedDb.get('SELECT address FROM unlocked_users WHERE address = ?', [address], (err, row) => {
+    if (err) return res.status(500).json({ unlocked: false });
+    res.json({ unlocked: !!row });
+  });
+});
+
+// Odblokowuje po płatności (wywoływane po sukcesie tx)
+app.post('/api/unlock-coin', (req, res) => {
+  const { address } = req.body;
+  if (!address || !isValidSolanaAddress(address)) {
+    return res.status(400).json({ success: false });
+  }
+
+  unlockedDb.run(
+    'INSERT OR IGNORE INTO unlocked_users (address) VALUES (?)',
+    [address],
+    function (err) {
+      if (err) {
+        console.error('Błąd odblokowania:', err);
+        return res.status(500).json({ success: false });
+      }
+      console.log(`Coin of the Day odblokowany dla: ${address}`);
+      res.json({ success: true });
+    }
+  );
+});
+
 export { keypair, rankingDb };
 
 // ================== START SERWERA ==================

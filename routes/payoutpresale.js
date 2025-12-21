@@ -48,7 +48,9 @@ connection = createConnection();
 const MNT_TOKEN_MINT = new PublicKey("DWPLeuggJtGAJ4dGLXnH94653f1xGE1Nf9TVyyiR5U35");
 
 // 1 SOL = 500 000 tokenów
-const TOKENS_PER_SOL = 500000;
+const TOKENS_PER_SOL = 1_176_470;
+
+console.log(`Wysyłka: ${tokenAmount} tokenów (${(tokenAmount / 1_000_000).toFixed(3)}M) za ${solAmount} SOL`);
 
 // Retry blockhash
 const getBlockhashWithRetry = async (retries = 10) => {
