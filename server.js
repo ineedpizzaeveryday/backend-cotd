@@ -80,9 +80,9 @@ app.use('/api/payoutslot', payoutRouter);
 app.use('/api/payoutring', payoutRingRouter);
 
 // ================== FUNKCJE POMOCNICZE ==================
-const calculateScore = (balance, shopping = 0) => balance * 1.0 + shopping * 2.2;
+const calculateScore = (balance, shopping = 0) => balance + shopping; 
 
-const isValidSolanaAddress = (addr犹如) => {
+const isValidSolanaAddress = (addr) => {
   try {
     new PublicKey(addr);
     return true;
@@ -90,6 +90,8 @@ const isValidSolanaAddress = (addr犹如) => {
     return false;
   }
 };
+
+const MINIMUM_INSTANT = 0.1; 
 
 // ================== ENDPOINTY RANKING ==================
 app.get('/ranking', (req, res) => {
@@ -110,6 +112,7 @@ app.get('/ranking', (req, res) => {
   );
 });
 
+// POST /ranking – DODAJ SPRAWDZENIE MINIMUM
 app.post('/ranking', (req, res) => {
   const { address, balance, username, shopping = 0 } = req.body;
 
@@ -117,7 +120,14 @@ app.post('/ranking', (req, res) => {
     return res.status(400).json({ error: 'Nieprawidłowe dane' });
   }
 
-  const score = calculateScore(balance, shopping);
+  // <<< NOWE: sprawdzamy minimum 0.1 $INSTANT przy dołączeniu >>>
+  if (balance < MINIMUM_INSTANT) {
+    return res.status(400).json({ 
+      error: `Minimum 0.1 $INSTANT required to join leaderboard. You have ${balance.toFixed(4)}` 
+    });
+  }
+
+  const score = balance + shopping;
 
   rankingDb.run(
     `INSERT INTO ranking (address, balance, username, shopping, score)
@@ -127,17 +137,19 @@ app.post('/ranking', (req, res) => {
        username = excluded.username,
        shopping = excluded.shopping,
        score = excluded.score`,
-    [address, balance, username, shopping, score],
+    [address, balance, username.trim(), shopping, score],
     function (err) {
       if (err) {
         console.error('Błąd zapisu do rankingu:', err);
         return res.status(500).json({ error: 'Błąd zapisu' });
       }
+      console.log(`Dołączono do rankingu: ${username.trim()} (${address.slice(0,8)}...) | ${balance} $INSTANT`);
       res.json({ success: true });
     }
   );
 });
 
+// POST /shopping – już masz dobre sprawdzenie min. 0.1
 app.post('/shopping', (req, res) => {
   const { address, points } = req.body;
 
@@ -147,11 +159,15 @@ app.post('/shopping', (req, res) => {
 
   rankingDb.get('SELECT balance, shopping FROM ranking WHERE address = ?', [address], (err, row) => {
     if (err || !row) {
-      return res.status(404).json({ error: 'Użytkownik nie istnieje' });
+      return res.status(404).json({ error: 'Użytkownik nie istnieje w rankingu' });
+    }
+
+    if (row.balance < MINIMUM_INSTANT) {
+      return res.status(400).json({ error: 'Za mało $INSTANT (wymagane min. 0.1)' });
     }
 
     const newShopping = (row.shopping || 0) + points;
-    const score = calculateScore(row.balance, newShopping);
+    const score = row.balance + newShopping;
 
     rankingDb.run(
       'UPDATE ranking SET shopping = ?, score = ? WHERE address = ?',
@@ -161,6 +177,7 @@ app.post('/shopping', (req, res) => {
           console.error('Błąd aktualizacji shopping:', err);
           return res.status(500).json({ error: 'Błąd aktualizacji' });
         }
+        console.log(`+${points} pkt dla ${address.slice(0,8)}... → score: ${score}`);
         res.json({ success: true, score });
       }
     );
