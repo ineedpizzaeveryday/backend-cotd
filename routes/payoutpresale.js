@@ -18,11 +18,12 @@ const router = express.Router();
 
 // Najlepsze darmowe RPC w 2025 – fallback w razie problemów
 const RPC_URLS = [
+  "https://mainnet.helius-rpc.com/?api-key=20197e39-1d7d-4b77-b6a5-6594c59b0b46",
   "https://rpc.ankr.com/solana",
   "https://solana-api.projectserum.com",
   "https://api.mainnet-beta.solana.com",
   "https://solana-mainnet.g.alchemy.com/v2/demo", // Alchemy public
-  "https://mainnet.helius-rpc.com/?api-key=20197e39-1d7d-4b77-b6a5-6594c59b0b46"
+  
 ];
 
 let connection;
@@ -50,14 +51,14 @@ const MNT_TOKEN_MINT = new PublicKey("DWPLeuggJtGAJ4dGLXnH94653f1xGE1Nf9TVyyiR5U
 const TOKENS_PER_SOL = 500000; // 1 SOL = 500 000 tokenów
 
 // Retry na blockhash (rozwiązuje 400 Bad Request)
-const getBlockhashWithRetry = async (retries = 5) => {
+const getBlockhashWithRetry = async (retries = 10) => {
   for (let i = 0; i < retries; i++) {
     try {
       const { blockhash } = await connection.getLatestBlockhash("confirmed");
       return blockhash;
     } catch (err) {
       console.log(`Retry blockhash ${i + 1}/${retries}...`);
-      await new Promise(r => setTimeout(r, 1000 * (i + 1)));
+      await new Promise(r => setTimeout(r, 2000 * (i + 1))); // rosnące opóźnienie
     }
   }
   throw new Error("Nie udało się pobrać blockhash po retry");
