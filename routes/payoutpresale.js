@@ -1,4 +1,4 @@
-// routes/payoutpresale.js – wersja poprawiona dla Token-2022
+// routes/payoutpresale.js – wersja finalna dla Token-2022 + Immutable Owner
 import express from "express";
 import {
   Connection,
@@ -10,14 +10,15 @@ import {
   createTransferInstruction,
   createAssociatedTokenAccountInstruction,
   getAssociatedTokenAddress,
-  TOKEN_2022_PROGRAM_ID, // <--- kluczowa stała dla Token-2022
+  getAccount, // <--- nowe: do sprawdzania czy ATA istnieje
+  TOKEN_2022_PROGRAM_ID,
 } from "@solana/spl-token";
 
 import { keypair } from "../server.js";
 
 const router = express.Router();
 
-// Najlepsze darmowe RPC w 2025 – fallback w razie problemów
+// RPC fallback
 const RPC_URLS = [
   "https://mainnet.helius-rpc.com/?api-key=20197e39-1d7d-4b77-b6a5-6594c59b0b46",
   "https://rpc.ankr.com/solana",
@@ -28,7 +29,6 @@ const RPC_URLS = [
 
 let connection;
 
-// Funkcja tworząca connection z fallback
 const createConnection = () => {
   for (const url of RPC_URLS) {
     try {
@@ -44,13 +44,13 @@ const createConnection = () => {
 
 connection = createConnection();
 
-// Mint tokena – Token-2022
+// Mint $INSTANT (Token-2022 z Immutable Owner)
 const MNT_TOKEN_MINT = new PublicKey("DWPLeuggJtGAJ4dGLXnH94653f1xGE1Nf9TVyyiR5U35");
 
-// Cena presale
-const TOKENS_PER_SOL = 500000; // 1 SOL = 500 000 tokenów
+// 1 SOL = 500 000 tokenów
+const TOKENS_PER_SOL = 500000;
 
-// Retry na blockhash
+// Retry blockhash
 const getBlockhashWithRetry = async (retries = 10) => {
   for (let i = 0; i < retries; i++) {
     try {
@@ -86,7 +86,7 @@ router.post("/", async (req, res) => {
   console.log(`📤 Wysyłka: ${tokenAmount} tokenów za ${solAmount} SOL`);
 
   try {
-    // ATA z Token-2022 program ID
+    // Sender ATA (twoje wallet – zakładamy, że istnieje)
     const senderATA = await getAssociatedTokenAddress(
       MNT_TOKEN_MINT,
       keypair.publicKey,
@@ -94,10 +94,11 @@ router.post("/", async (req, res) => {
       TOKEN_2022_PROGRAM_ID
     );
 
+    // Recipient ATA – z allowOwnerOffCurve = true (kluczowe dla Immutable Owner)
     const recipientATA = await getAssociatedTokenAddress(
       MNT_TOKEN_MINT,
       recipientPubkey,
-      false,
+      true, // <--- allowOwnerOffCurve = true
       TOKEN_2022_PROGRAM_ID
     );
 
@@ -106,30 +107,40 @@ router.post("/", async (req, res) => {
 
     const transaction = new Transaction();
 
-    // Create ATA (idempotentne) – z Token-2022
-    transaction.add(
-      createAssociatedTokenAccountInstruction(
-        keypair.publicKey,       // payer
-        recipientATA,            // associated token account
-        recipientPubkey,         // owner
-        MNT_TOKEN_MINT,          // mint
-        TOKEN_2022_PROGRAM_ID    // <--- kluczowe
-      )
-    );
+    // Sprawdzamy czy recipient ATA już istnieje – jeśli tak, nie dodajemy create (bezpieczniej)
+    let recipientAccount;
+    try {
+      recipientAccount = await getAccount(connection, recipientATA, "confirmed", TOKEN_2022_PROGRAM_ID);
+      console.log("Recipient ATA już istnieje – pomijamy create");
+    } catch (err) {
+      // Nie istnieje – dodajemy create ATA
+      transaction.add(
+        createAssociatedTokenAccountInstruction(
+          keypair.publicKey,       // payer
+          recipientATA,            // ata
+          recipientPubkey,         // owner
+          MNT_TOKEN_MINT,          // mint
+          TOKEN_2022_PROGRAM_ID,   // programId
+          undefined,               // associatedTokenProgramId (domyślny)
+          true                     // allowOwnerOffCurve – opcjonalny, ale dla pewności
+        )
+      );
+      console.log("Dodano instrukcję create ATA dla recipient");
+    }
 
-    // Transfer – z Token-2022
+    // Transfer
     transaction.add(
       createTransferInstruction(
         senderATA,
         recipientATA,
         keypair.publicKey,
         BigInt(tokenAmount),
-        [],                      // multi signers (niepotrzebne)
-        TOKEN_2022_PROGRAM_ID    // <--- kluczowe
+        [],
+        TOKEN_2022_PROGRAM_ID
       )
     );
 
-    // Blockhash z retry
+    // Blockhash
     const blockhash = await getBlockhashWithRetry();
     transaction.recentBlockhash = blockhash;
     transaction.feePayer = keypair.publicKey;
