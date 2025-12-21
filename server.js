@@ -32,6 +32,10 @@ const RANKING_DB_PATH = path.resolve('./ranking.db');
 const DATA_DIR = path.resolve('./data');
 const coinDataPath = path.resolve('./data/coindata.json');
 
+const MINT_ADDRESS = 'DWPLeuggJtGAJ4dGLXnH94653f1xGE1Nf9TVyyiR5U35';
+const MINIMUM_INSTANT = 0.1;
+const TOKEN_2022_PROGRAM_ID = 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb';
+
 // Utwórz folder data jeśli nie istnieje (kluczowe na Render)
 if (!fs.existsSync(DATA_DIR)) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -100,171 +104,106 @@ const isValidSolanaAddress = (addr) => {
   }
 };
 
-const MINIMUM_INSTANT = 0.1; 
-
 // ================== ENDPOINTY RANKING ==================
-app.get('/ranking', (req, res) => {
-  const page = Math.max(1, parseInt(req.query.page) || 1);
-  const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 50));
-  const offset = (page - 1) * limit;
 
-  rankingDb.all(
-    'SELECT address, balance, username, shopping, score FROM ranking ORDER BY score DESC LIMIT ? OFFSET ?',
-    [limit, offset],
-    (err, rows) => {
-      if (err) {
-        console.error('Błąd pobierania rankingu:', err);
-        return res.status(500).json({ error: 'Błąd serwera' });
+
+// POST /ranking – dołączenie
+app.post('/ranking', async (req, res) => {
+  const { address, username } = req.body;
+  if (!address || !username || !isValidSolanaAddress(address)) return res.status(400).json({ error: 'Bad data' });
+
+  const trimmed = username.trim();
+  if (trimmed.length === 0) return res.status(400).json({ error: 'Empty nickname' });
+
+  try {
+    const connection = new Connection(process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com');
+    const mint = new PublicKey(MINT_ADDRESS);
+    const userPk = new PublicKey(address);
+
+    const ata = await getAssociatedTokenAddress(
+      mint,
+      userPk,
+      true,
+      TOKEN_2022_PROGRAM_ID
+    );
+
+    let balance = 0;
+    try {
+      const acc = await getAccount(connection, ata, 'confirmed', TOKEN_2022_PROGRAM_ID);
+      const mintInfo = await getMint(connection, mint, 'confirmed', TOKEN_2022_PROGRAM_ID);
+      balance = Number(acc.amount) / Math.pow(10, mintInfo.decimals);
+    } catch {}
+
+    if (balance < MINIMUM_INSTANT) {
+      return res.status(400).json({ error: `Min 0.1 $INSTANT required. Current: ${balance.toFixed(4)}` });
+    }
+
+    rankingDb.run(
+      `INSERT INTO ranking (address, username) VALUES (?, ?)
+       ON CONFLICT(address) DO UPDATE SET username = excluded.username`,
+      [address, trimmed],
+      (err) => {
+        if (err) return res.status(500).json({ error: 'DB error' });
+        res.json({ success: true });
       }
+    );
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Blockchain error' });
+  }
+});
+
+// GET /ranking
+app.get('/ranking', (req, res) => {
+  rankingDb.all(
+    `SELECT address, username, shopping FROM ranking ORDER BY shopping DESC LIMIT 100`,
+    (err, rows) => {
+      if (err) return res.status(500).json({ error: 'DB error' });
       res.json(rows);
     }
   );
 });
 
-// POST /ranking – DODAJ SPRAWDZENIE MINIMUM
-app.post('/ranking', async (req, res) => {
-  const { address, username } = req.body;
-
-  if (!address || !username || !isValidSolanaAddress(address)) {
-    return res.status(400).json({ error: 'Nieprawidłowe dane' });
-  }
-
-  const trimmedUsername = username.trim();
-  if (trimmedUsername.length === 0) {
-    return res.status(400).json({ error: 'Nickname nie może być pusty' });
+// POST /shopping
+app.post('/shopping', async (req, res) => {
+  const { address, points } = req.body;
+  if (!address || !points || !isValidSolanaAddress(address)) {
+    return res.status(400).json({ error: 'Bad data' });
   }
 
   try {
-    // Połącz się z Solana RPC (użyj tego samego co w innych miejscach)
-    const connection = new Connection(process.env.SOLANA_RPC_URL || "https://api.mainnet-beta.solana.com");
+    const connection = new Connection(process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com');
+    const mint = new PublicKey(MINT_ADDRESS);
+    const userPk = new PublicKey(address);
 
-    const mint = new PublicKey("DWPLeuggJtGAJ4dGLXnH94653f1xGE1Nf9TVyyiR5U35");
-    const userPubkey = new PublicKey(address);
-
-    // Oblicz ATA (Token-2022 wymaga allowOwnerOffCurve = true)
-    const ata = await getAssociatedTokenAddress(
-      mint,
-      userPubkey,
-      true, // allowOwnerOffCurve
-      TOKEN_2022_PROGRAM_ID // <-- kluczowe!
-    );
-
-    let tokenBalance = 0;
+    const ata = await getAssociatedTokenAddress(mint, userPk, true, TOKEN_2022_PROGRAM_ID);
+    let balance = 0;
     try {
-      const account = await getAccount(connection, ata);
-      const mintInfo = await getMint(connection, mint);
-      tokenBalance = Number(account.amount.toString()) / Math.pow(10, mintInfo.decimals);
-    } catch (err) {
-      // Jeśli ATA nie istnieje lub błąd → balance = 0
-      tokenBalance = 0;
-    }
+      const acc = await getAccount(connection, ata, 'confirmed', TOKEN_2022_PROGRAM_ID);
+      const mintInfo = await getMint(connection, mint, 'confirmed', TOKEN_2022_PROGRAM_ID);
+      balance = Number(acc.amount) / Math.pow(10, mintInfo.decimals);
+    } catch {}
 
-    // Sprawdzamy minimum na backendzie – to jest wiarygodne źródło
-    if (tokenBalance < MINIMUM_INSTANT) {
-      return res.status(400).json({
-        error: `You need at least 0.1 $INSTANT to join the leaderboard. Current balance: ${tokenBalance.toFixed(4)}`
-      });
+    if (balance < MINIMUM_INSTANT) {
+      return res.status(400).json({ error: 'Min 0.1 $INSTANT required to buy gifts' });
     }
-
-    const score = tokenBalance + 0; // shopping = 0 przy pierwszym dołączeniu
 
     rankingDb.run(
-      `INSERT INTO ranking (address, balance, username, shopping, score)
-       VALUES (?, ?, ?, 0, ?)
-       ON CONFLICT(address) DO UPDATE SET
-         balance = excluded.balance,
-         username = excluded.username,
-         score = excluded.balance + shopping`,
-      [address, tokenBalance, trimmedUsername, score],
+      `UPDATE ranking SET shopping = shopping + ? WHERE address = ?`,
+      [points, address],
       function (err) {
-        if (err) {
-          console.error('Błąd zapisu do rankingu:', err);
-          return res.status(500).json({ error: 'Błąd zapisu do bazy' });
+        if (err || this.changes === 0) {
+          return res.status(404).json({ error: 'User not in ranking' });
         }
-        console.log(`Dołączono: ${trimmedUsername} (${address.slice(0,8)}...) | ${tokenBalance} $INSTANT`);
-        res.json({ success: true, balance: tokenBalance });
+        res.json({ success: true });
       }
     );
-  } catch (error) {
-    console.error('Błąd sprawdzania salda na blockchainie:', error);
-    res.status(500).json({ error: 'Błąd połączenia z blockchainem' });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Blockchain error' });
   }
 });
 
-// POST /shopping – już masz dobre sprawdzenie min. 0.1
-app.post('/shopping', (req, res) => {
-  const { address, points } = req.body;
-
-  if (!address || points === undefined || !isValidSolanaAddress(address)) {
-    return res.status(400).json({ error: 'Nieprawidłowe dane' });
-  }
-
-  rankingDb.get('SELECT balance, shopping FROM ranking WHERE address = ?', [address], (err, row) => {
-    if (err || !row) {
-      return res.status(404).json({ error: 'Użytkownik nie istnieje w rankingu' });
-    }
-
-    if (row.balance < MINIMUM_INSTANT) {
-      return res.status(400).json({ error: 'Za mało $INSTANT (wymagane min. 0.1)' });
-    }
-
-    const newShopping = (row.shopping || 0) + points;
-    const score = row.balance + newShopping;
-
-    rankingDb.run(
-      'UPDATE ranking SET shopping = ?, score = ? WHERE address = ?',
-      [newShopping, score, address],
-      (err) => {
-        if (err) {
-          console.error('Błąd aktualizacji shopping:', err);
-          return res.status(500).json({ error: 'Błąd aktualizacji' });
-        }
-        console.log(`+${points} pkt dla ${address.slice(0,8)}... → score: ${score}`);
-        res.json({ success: true, score });
-      }
-    );
-  });
-});
-
-app.post('/refresh-balances', async (req, res) => {
-  const connection = new Connection(process.env.SOLANA_RPC_URL || 'https://rpc.hellomoon.io');
-
-  rankingDb.all('SELECT address, shopping FROM ranking', async (err, rows) => {
-    if (err) return res.status(500).json({ error: 'Błąd odczytu bazy' });
-
-    const batchSize = 40; // trochę mniej niż 50 – bezpieczniej dla RPC
-    let updated = 0;
-
-    for (let i = 0; i < rows.length; i += batchSize) {
-      const batch = rows.slice(i, i + batchSize);
-
-      const balancePromises = batch.map(async ({ address }) => {
-        try {
-          const balanceLamports = await connection.getBalance(new PublicKey(address));
-          return { address, balanceSOL: balanceLamports / 1_000_000_000 };
-        } catch (e) {
-          console.error(`Błąd pobierania salda ${address}:`, e.message);
-          return null;
-        }
-      });
-
-      const balances = (await Promise.all(balancePromises)).filter(Boolean);
-
-      for (const { address, balanceSOL } of balances) {
-        const user = rows.find(r => r.address === address);
-        const score = calculateScore(balanceSOL, user.shopping || 0);
-
-        rankingDb.run(
-          'UPDATE ranking SET balance = ?, score = ? WHERE address = ?',
-          [balanceSOL, score, address]
-        );
-        updated++;
-      }
-    }
-
-    res.json({ success: true, updated });
-  });
-});
 
 // ================== POZOSTAŁE ENDPOINTY ==================
 app.post('/addTransaction', addRandomTransaction);
