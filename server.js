@@ -13,6 +13,15 @@ import payoutRingRouter from './routes/payoutring.js';
 import payoutPresaleRouter from './routes/payoutpresale.js';
 import payoutRouter from './routes/payoutslot.js';
 import { getDecryptedKeypair } from './secureKey.js';
+import {
+  getAssociatedTokenAddress,
+  getAccount,
+  getMint,
+  TOKEN_2022_PROGRAM_ID,
+} from "@solana/spl-token";
+
+
+
 
 // ================== KONFIGURACJA ==================
 const app = express();
@@ -113,40 +122,73 @@ app.get('/ranking', (req, res) => {
 });
 
 // POST /ranking – DODAJ SPRAWDZENIE MINIMUM
-app.post('/ranking', (req, res) => {
-  const { address, balance, username, shopping = 0 } = req.body;
+app.post('/ranking', async (req, res) => {
+  const { address, username } = req.body;
 
-  if (!address || !username || balance === undefined || !isValidSolanaAddress(address)) {
+  if (!address || !username || !isValidSolanaAddress(address)) {
     return res.status(400).json({ error: 'Nieprawidłowe dane' });
   }
 
-  // <<< NOWE: sprawdzamy minimum 0.1 $INSTANT przy dołączeniu >>>
-  if (balance < MINIMUM_INSTANT) {
-    return res.status(400).json({ 
-      error: `Minimum 0.1 $INSTANT required to join leaderboard. You have ${balance.toFixed(4)}` 
-    });
+  const trimmedUsername = username.trim();
+  if (trimmedUsername.length === 0) {
+    return res.status(400).json({ error: 'Nickname nie może być pusty' });
   }
 
-  const score = balance + shopping;
+  try {
+    // Połącz się z Solana RPC (użyj tego samego co w innych miejscach)
+    const connection = new Connection(process.env.SOLANA_RPC_URL || "https://api.mainnet-beta.solana.com");
 
-  rankingDb.run(
-    `INSERT INTO ranking (address, balance, username, shopping, score)
-     VALUES (?, ?, ?, ?, ?)
-     ON CONFLICT(address) DO UPDATE SET
-       balance = excluded.balance,
-       username = excluded.username,
-       shopping = excluded.shopping,
-       score = excluded.score`,
-    [address, balance, username.trim(), shopping, score],
-    function (err) {
-      if (err) {
-        console.error('Błąd zapisu do rankingu:', err);
-        return res.status(500).json({ error: 'Błąd zapisu' });
-      }
-      console.log(`Dołączono do rankingu: ${username.trim()} (${address.slice(0,8)}...) | ${balance} $INSTANT`);
-      res.json({ success: true });
+    const mint = new PublicKey("DWPLeuggJtGAJ4dGLXnH94653f1xGE1Nf9TVyyiR5U35");
+    const userPubkey = new PublicKey(address);
+
+    // Oblicz ATA (Token-2022 wymaga allowOwnerOffCurve = true)
+    const ata = await getAssociatedTokenAddress(
+      mint,
+      userPubkey,
+      true, // allowOwnerOffCurve
+      TOKEN_2022_PROGRAM_ID // <-- kluczowe!
+    );
+
+    let tokenBalance = 0;
+    try {
+      const account = await getAccount(connection, ata);
+      const mintInfo = await getMint(connection, mint);
+      tokenBalance = Number(account.amount.toString()) / Math.pow(10, mintInfo.decimals);
+    } catch (err) {
+      // Jeśli ATA nie istnieje lub błąd → balance = 0
+      tokenBalance = 0;
     }
-  );
+
+    // Sprawdzamy minimum na backendzie – to jest wiarygodne źródło
+    if (tokenBalance < MINIMUM_INSTANT) {
+      return res.status(400).json({
+        error: `You need at least 0.1 $INSTANT to join the leaderboard. Current balance: ${tokenBalance.toFixed(4)}`
+      });
+    }
+
+    const score = tokenBalance + 0; // shopping = 0 przy pierwszym dołączeniu
+
+    rankingDb.run(
+      `INSERT INTO ranking (address, balance, username, shopping, score)
+       VALUES (?, ?, ?, 0, ?)
+       ON CONFLICT(address) DO UPDATE SET
+         balance = excluded.balance,
+         username = excluded.username,
+         score = excluded.balance + shopping`,
+      [address, tokenBalance, trimmedUsername, score],
+      function (err) {
+        if (err) {
+          console.error('Błąd zapisu do rankingu:', err);
+          return res.status(500).json({ error: 'Błąd zapisu do bazy' });
+        }
+        console.log(`Dołączono: ${trimmedUsername} (${address.slice(0,8)}...) | ${tokenBalance} $INSTANT`);
+        res.json({ success: true, balance: tokenBalance });
+      }
+    );
+  } catch (error) {
+    console.error('Błąd sprawdzania salda na blockchainie:', error);
+    res.status(500).json({ error: 'Błąd połączenia z blockchainem' });
+  }
 });
 
 // POST /shopping – już masz dobre sprawdzenie min. 0.1
