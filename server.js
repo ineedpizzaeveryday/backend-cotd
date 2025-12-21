@@ -1,11 +1,12 @@
 import dotenv from 'dotenv';
 dotenv.config();
-import express from 'express';
+
+import express from 'express';                // ← DODANE!
 import cors from 'cors';
 import fs from 'fs';
 import path from 'path';
 import sqlite3 from 'sqlite3';
-import { Connection, PublicKey } from '@solana/web3.js';
+import { Connection, PublicKey } from '@solana/web3.js';  // Usunąłem Transaction i SystemProgram – nie są używane w server.js
 
 import { addRandomTransaction, getTransactionCount } from './transactions.js';
 import { addLotteryTransaction, getLotteryTransactionCount } from './lottransactions.js';
@@ -20,9 +21,6 @@ import {
   TOKEN_2022_PROGRAM_ID,
 } from "@solana/spl-token";
 
-
-
-
 // ================== KONFIGURACJA ==================
 const app = express();
 const PORT = process.env.PORT || 10000;
@@ -32,9 +30,9 @@ const RANKING_DB_PATH = path.resolve('./ranking.db');
 const DATA_DIR = path.resolve('./data');
 const coinDataPath = path.resolve('./data/coindata.json');
 
+// ================== STAŁE ==================
 const MINT_ADDRESS = 'DWPLeuggJtGAJ4dGLXnH94653f1xGE1Nf9TVyyiR5U35';
 const MINIMUM_INSTANT = 0.1;
-const TOKEN_2022_PROGRAM_ID = 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb';
 
 // Utwórz folder data jeśli nie istnieje (kluczowe na Render)
 if (!fs.existsSync(DATA_DIR)) {
