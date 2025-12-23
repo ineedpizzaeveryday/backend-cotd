@@ -75,6 +75,10 @@ export const getLotteryTransactionCount = (req, res) => {
       console.error('Błąd licznika loterii:', err);
       return res.status(500).json({ error: 'DB error' });
     }
-    res.json({ count: row.count || 0 });
+
+    const realCount = row.count || 0;
+    const displayedCount = Math.max(46, realCount); // ← magia tutaj
+
+    res.json({ count: displayedCount });
   });
 };
