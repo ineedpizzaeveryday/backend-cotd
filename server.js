@@ -91,12 +91,7 @@ app.use('/api/payoutpresale', payoutPresaleRouter);
 app.use('/api/payoutslot', payoutRouter);
 app.use('/api/payoutring', payoutRingRouter);
 
-app.post('/api/projects/add', (req, res) => {
-  console.log('Dotarło POST /api/projects/add', req.body);
-  res.json({ success: true, received: req.body });
-});
 
-app.use('/api/projects', projectsRouter);
 
 // ================== FUNKCJE POMOCNICZE ==================
 const calculateScore = (balance, shopping = 0) => balance + shopping; 
