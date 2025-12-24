@@ -8,7 +8,7 @@ import fs from 'fs';
 import path from 'path';
 import sqlite3 from 'sqlite3';
 import { Connection, PublicKey } from '@solana/web3.js';  // Usunąłem Transaction i SystemProgram – nie są używane w server.js
-
+import projectsRouter from './routes/projects.js';
 import { addRandomTransaction, getTransactionCount } from './transactions.js';
 import { addLotteryTransaction, getLotteryTransactionCount } from './lottransactions.js';
 import payoutRingRouter from './routes/payoutring.js';
@@ -90,6 +90,8 @@ app.use(express.json()); // Tylko raz, na początku!
 app.use('/api/payoutpresale', payoutPresaleRouter);
 app.use('/api/payoutslot', payoutRouter);
 app.use('/api/payoutring', payoutRingRouter);
+
+app.use('/api/projects', projectsRouter);
 
 // ================== FUNKCJE POMOCNICZE ==================
 const calculateScore = (balance, shopping = 0) => balance + shopping; 
