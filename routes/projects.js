@@ -4,48 +4,47 @@ import sqlite3 from 'sqlite3';
 import path from 'path';
 
 const router = express.Router();
-
-// Ścieżka do bazy – taka sama jak w ranking.db
 const PROJECTS_DB_PATH = path.resolve('./data/projects.db');
 
-// Połączenie z bazą (otwierane raz przy starcie modułu)
 const db = new sqlite3.Database(PROJECTS_DB_PATH, (err) => {
   if (err) {
     console.error('❌ Błąd połączenia z projects.db:', err.message);
-    return;
+  } else {
+    console.log('✅ Połączono z projects.db');
+    initializeDatabase(); // ← wywołujemy poza callbackiem
   }
+});
 
-  console.log('✅ Połączono z projects.db');
+// Funkcja inicjalizująca bazę – osobno, aby uniknąć race condition
+function initializeDatabase() {
+  db.serialize(() => {  // ← kolejność gwarantowana
+    db.run(`
+      CREATE TABLE IF NOT EXISTS projects (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        wallet          TEXT NOT NULL UNIQUE,
+        project_name    TEXT NOT NULL,
+        ticker          TEXT NOT NULL CHECK(length(ticker) <= 8),
+        score           INTEGER DEFAULT 0,
+        created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
+        last_vote_by    TEXT DEFAULT '{}'
+      )
+    `, (err) => {
+      if (err) {
+        console.error('❌ Błąd tworzenia tabeli:', err.message);
+        return;
+      }
+      console.log('✅ Tabela projects gotowa');
+    });
 
-  // 1. Najpierw tabela
-  db.run(`
-    CREATE TABLE IF NOT EXISTS projects (
-      id              INTEGER PRIMARY KEY AUTOINCREMENT,
-      wallet          TEXT NOT NULL UNIQUE,
-      project_name    TEXT NOT NULL,
-      ticker          TEXT NOT NULL CHECK(length(ticker) <= 8),
-      score           INTEGER DEFAULT 0,
-      created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
-      last_vote_by    TEXT DEFAULT '{}'
-    )
-  `, (err) => {
-    if (err) {
-      console.error('❌ Błąd tworzenia tabeli projects:', err.message);
-      return;
-    }
-
-    console.log('✅ Tabela projects gotowa');
-
-    // 2. Dopiero teraz indeks
     db.run(`CREATE INDEX IF NOT EXISTS idx_projects_score ON projects(score DESC)`, (err) => {
       if (err) {
-        console.error('❌ Błąd tworzenia indeksu score:', err.message);
+        console.error('❌ Błąd tworzenia indeksu:', err.message);
       } else {
         console.log('✅ Indeks score utworzony');
       }
     });
   });
-});
+}
 
 // Pomocnicza funkcja sprawdzająca cooldown głosowania (3 godziny)
 function canVote(wallet, lastVoteByStr) {
