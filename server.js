@@ -91,6 +91,7 @@ app.use('/api/payoutpresale', payoutPresaleRouter);
 app.use('/api/payoutslot', payoutRouter);
 app.use('/api/payoutring', payoutRingRouter);
 
+app.use('/api/projects', projectsRouter);
 
 
 // ================== FUNKCJE POMOCNICZE ==================
