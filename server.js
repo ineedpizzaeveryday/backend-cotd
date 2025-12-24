@@ -84,12 +84,17 @@ app.use(cors({
   credentials: true
 }));
 
-app.use(express.json()); // Tylko raz, na początku!
+app.use(express.json()); 
 
 
 app.use('/api/payoutpresale', payoutPresaleRouter);
 app.use('/api/payoutslot', payoutRouter);
 app.use('/api/payoutring', payoutRingRouter);
+
+app.post('/api/projects/add', (req, res) => {
+  console.log('Dotarło POST /api/projects/add', req.body);
+  res.json({ success: true, received: req.body });
+});
 
 app.use('/api/projects', projectsRouter);
 
