@@ -12,31 +12,39 @@ const PROJECTS_DB_PATH = path.resolve('./data/projects.db');
 const db = new sqlite3.Database(PROJECTS_DB_PATH, (err) => {
   if (err) {
     console.error('❌ Błąd połączenia z projects.db:', err.message);
-  } else {
-    console.log('✅ Połączono z projects.db');
+    return;
+  }
 
-    // Tworzenie tabeli jeśli nie istnieje
-    db.run(`
-      CREATE TABLE IF NOT EXISTS projects (
-        id              INTEGER PRIMARY KEY AUTOINCREMENT,
-        wallet          TEXT NOT NULL UNIQUE,
-        project_name    TEXT NOT NULL,
-        ticker          TEXT NOT NULL CHECK(length(ticker) <= 8),
-        score           INTEGER DEFAULT 0,
-        created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
-        last_vote_by    TEXT DEFAULT '{}'   -- przechowujemy jako JSON string
-      )
-    `, (err) => {
+  console.log('✅ Połączono z projects.db');
+
+  // 1. Najpierw tabela
+  db.run(`
+    CREATE TABLE IF NOT EXISTS projects (
+      id              INTEGER PRIMARY KEY AUTOINCREMENT,
+      wallet          TEXT NOT NULL UNIQUE,
+      project_name    TEXT NOT NULL,
+      ticker          TEXT NOT NULL CHECK(length(ticker) <= 8),
+      score           INTEGER DEFAULT 0,
+      created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
+      last_vote_by    TEXT DEFAULT '{}'
+    )
+  `, (err) => {
+    if (err) {
+      console.error('❌ Błąd tworzenia tabeli projects:', err.message);
+      return;
+    }
+
+    console.log('✅ Tabela projects gotowa');
+
+    // 2. Dopiero teraz indeks
+    db.run(`CREATE INDEX IF NOT EXISTS idx_projects_score ON projects(score DESC)`, (err) => {
       if (err) {
-        console.error('Błąd tworzenia tabeli projects:', err.message);
+        console.error('❌ Błąd tworzenia indeksu score:', err.message);
+      } else {
+        console.log('✅ Indeks score utworzony');
       }
     });
-
-    // Przydatne indeksy przyspieszające sortowanie i wyszukiwanie
-    db.run(`CREATE INDEX IF NOT EXISTS idx_projects_score ON projects(score DESC)`, (err) => {
-      if (err) console.error('Błąd tworzenia indeksu score:', err.message);
-    });
-  }
+  });
 });
 
 // Pomocnicza funkcja sprawdzająca cooldown głosowania (3 godziny)
