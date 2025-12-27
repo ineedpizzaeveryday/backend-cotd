@@ -11,19 +11,46 @@ const db = new sqlite3.Database(PROJECTS_DB_PATH, (err) => {
     console.error('❌ Błąd połączenia z projects.db:', err.message);
   } else {
     console.log('✅ Połączono z projects.db');
-    initializeDatabase(); // ← wywołujemy poza callbackiem
+    initializeDatabase();
   }
 });
 
-// Funkcja inicjalizująca bazę – osobno, aby uniknąć race condition
+// Pomocnicze funkcje
+function isValidWebsite(str) {
+  if (!str) return true;
+  str = str.trim();
+  if (str.length > 200 || str.length < 4) return false;
+  
+  try {
+    // Próbujemy stworzyć obiekt URL – najpewniejsza walidacja
+    new URL(str.startsWith('http') ? str : 'https://' + str);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function getVotesMap(lastVoteByStr) {
+  if (!lastVoteByStr) return {};
+  try {
+    const parsed = JSON.parse(lastVoteByStr);
+    return (typeof parsed === 'object' && parsed !== null) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+// Inicjalizacja bazy + migracja
 function initializeDatabase() {
-  db.serialize(() => {  // ← kolejność gwarantowana
+  db.serialize(() => {
+    // Tworzenie tabeli
     db.run(`
       CREATE TABLE IF NOT EXISTS projects (
         id              INTEGER PRIMARY KEY AUTOINCREMENT,
         wallet          TEXT NOT NULL UNIQUE,
         project_name    TEXT NOT NULL,
         ticker          TEXT NOT NULL CHECK(length(ticker) <= 8),
+        website         TEXT,
         score           INTEGER DEFAULT 0,
         created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
         last_vote_by    TEXT DEFAULT '{}'
@@ -36,6 +63,15 @@ function initializeDatabase() {
       console.log('✅ Tabela projects gotowa');
     });
 
+    // Migracja - dodanie kolumny website jeśli jeszcze nie istnieje
+    db.run(`ALTER TABLE projects ADD COLUMN website TEXT`, (err) => {
+      // Ignorujemy błąd jeśli kolumna już istnieje
+      if (err && !err.message.includes('duplicate column name')) {
+        console.error('Błąd migracji - dodanie kolumny website:', err.message);
+      }
+    });
+
+    // Indeks dla sortowania po score
     db.run(`CREATE INDEX IF NOT EXISTS idx_projects_score ON projects(score DESC)`, (err) => {
       if (err) {
         console.error('❌ Błąd tworzenia indeksu:', err.message);
@@ -46,31 +82,32 @@ function initializeDatabase() {
   });
 }
 
-// Pomocnicza funkcja sprawdzająca cooldown głosowania (3 godziny)
+// Sprawdzenie cooldownu głosowania
 function canVote(wallet, lastVoteByStr) {
-  try {
-    const votes = JSON.parse(lastVoteByStr || '{}');
-    const lastVoteTime = votes[wallet.toLowerCase()];
-    if (!lastVoteTime) return true;
+  const votes = getVotesMap(lastVoteByStr);
+  const lastVoteTime = votes[wallet.toLowerCase()];
+  if (!lastVoteTime) return true;
 
-    const diffMs = Date.now() - new Date(lastVoteTime).getTime();
-    return diffMs >= 3 * 60 * 60 * 1000; // 3 godziny w milisekundach
-  } catch (e) {
-    return true; // w razie błędnego JSON → pozwalamy głosować
-  }
+  const diffMs = Date.now() - new Date(lastVoteTime).getTime();
+  return diffMs >= 3 * 60 * 60 * 1000; // 3 godziny
 }
 
-// 1. Dodanie projektu (jeden na portfel)
+// 1. Dodanie projektu
 router.post('/add', (req, res) => {
-  const { wallet, project_name, ticker } = req.body;
+  const { wallet, project_name, ticker, website } = req.body;
 
   if (!wallet || !project_name || !ticker) {
     return res.status(400).json({ error: 'Brak wymaganych pól: wallet, project_name, ticker' });
   }
 
+  if (website && !isValidWebsite(website)) {
+    return res.status(400).json({ error: 'Nieprawidłowy format strony WWW' });
+  }
+
   const cleanWallet = wallet.toLowerCase().trim();
   const cleanName = project_name.trim().slice(0, 120);
   const cleanTicker = ticker.trim().toUpperCase().slice(0, 8);
+  const finalWebsite = website ? website.trim() : null;
 
   if (cleanTicker.length < 2) {
     return res.status(400).json({ error: 'Ticker musi mieć minimum 2 znaki' });
@@ -90,9 +127,9 @@ router.post('/add', (req, res) => {
     }
 
     db.run(
-      `INSERT INTO projects (wallet, project_name, ticker, score)
-       VALUES (?, ?, ?, 0)`,
-      [cleanWallet, cleanName, cleanTicker],
+      `INSERT INTO projects (wallet, project_name, ticker, website, score)
+       VALUES (?, ?, ?, ?, 0)`,
+      [cleanWallet, cleanName, cleanTicker, finalWebsite, 0],
       function (err) {
         if (err) {
           console.error('Błąd dodawania projektu:', err);
@@ -104,10 +141,10 @@ router.post('/add', (req, res) => {
   });
 });
 
-// 2. Lista top 30 (aktywnych projektów)
+// 2. Lista top 30
 router.get('/top', (req, res) => {
   db.all(
-    `SELECT id, wallet, project_name, ticker, score
+    `SELECT id, wallet, project_name, ticker, website, score
      FROM projects
      WHERE score > -10
      ORDER BY score DESC
@@ -123,7 +160,7 @@ router.get('/top', (req, res) => {
   );
 });
 
-// 3. Głosowanie (up/down)
+// 3. Głosowanie
 router.post('/vote', (req, res) => {
   const { id, wallet, direction } = req.body;
 
@@ -142,14 +179,13 @@ router.post('/vote', (req, res) => {
       return res.status(404).json({ error: 'Projekt nie znaleziony' });
     }
 
-    // Sprawdzamy cooldown
     if (!canVote(cleanWallet, row.last_vote_by)) {
       return res.status(429).json({ error: 'Możesz głosować raz na 3 godziny' });
     }
 
     const newScore = row.score + direction;
 
-    // Jeśli ≤ -10 → usuwamy projekt
+    // Usuwamy projekt jeśli score <= -10
     if (newScore <= -10) {
       db.run('DELETE FROM projects WHERE id = ?', [id], (delErr) => {
         if (delErr) console.error('Błąd usuwania projektu:', delErr);
@@ -157,12 +193,8 @@ router.post('/vote', (req, res) => {
       return res.json({ success: true, deleted: true });
     }
 
-    // Aktualizacja głosu i timestampu
-    let votes = {};
-    try {
-      votes = JSON.parse(row.last_vote_by || '{}');
-    } catch {}
-
+    // Aktualizacja głosowania
+    const votes = getVotesMap(row.last_vote_by);
     votes[cleanWallet] = new Date().toISOString();
 
     db.run(
