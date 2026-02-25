@@ -77,64 +77,6 @@ if (fs.existsSync(RANKING_DB_PATH)) {
   });
 });
 
-
-const mongoose = require('mongoose');
-
-const investorSchema = new mongoose.Schema({
-  walletAddress: {
-    type: String,
-    required: true,
-    unique: true,      // <-- najważniejsze – tylko raz na wallet
-    index: true
-  },
-  joinedAt: {
-    type: Date,
-    default: Date.now
-  }
-});
-
-module.exports = mongoose.model('Investor', investorSchema);
-
-const Investor = require('./models/Investor');   // lub ścieżka do pliku
-
-// ====================== INVESTORS API ======================
-
-// Pobierz aktualny licznik (używane co 15s + przy starcie)
-app.get('/api/investors/count', async (req, res) => {
-  try {
-    const total = await Investor.countDocuments();
-    res.json({ total });
-  } catch (err) {
-    console.error(err);
-    res.json({ total: 0 });
-  }
-});
-
-// Rejestracja portfela – +1 tylko jeśli nowy
-app.post('/api/investors/register', async (req, res) => {
-  const { walletAddress } = req.body;
-
-  if (!walletAddress || walletAddress.length < 32) {
-    return res.status(400).json({ error: 'Niepoprawny adres' });
-  }
-
-  try {
-    // upsert = jeśli nie istnieje → dodaj, jeśli istnieje → nic nie rób
-    const result = await Investor.findOneAndUpdate(
-      { walletAddress },
-      { $setOnInsert: { joinedAt: new Date() } },
-      { upsert: true, new: true }
-    );
-
-    const wasNew = result.__v === 0; // nowy dokument ma __v = 0 przy upsert
-
-    res.json({ success: true, wasNew });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Błąd serwera' });
-  }
-});
-
 // ================== MIDDLEWARE ==================
 app.use(cors({
   origin: ['https://cotd-one.vercel.app', 'http://localhost:5173', 'https://www.cookingcrypto.org', 'https://cookingcrypto.org'],
@@ -266,7 +208,59 @@ app.post('/shopping', async (req, res) => {
 
 
 
+// === Na górze pliku (po imports) ===
+const mongoose = require('mongoose'); // jeśli jeszcze nie masz
 
+// Model (możesz wrzucić do osobnego pliku models/Investor.js)
+const investorSchema = new mongoose.Schema({
+  walletAddress: { type: String, required: true, unique: true, index: true },
+  date: { type: String, required: true },           // YYYY-MM-DD
+  joinedAt: { type: Date, default: Date.now }
+});
+
+const Investor = mongoose.model('Investor', investorSchema);
+
+// === ROUTES (najlepiej w osobnym routerze, ale dla szybkości dodaj bezpośrednio) ===
+
+// GET aktualne liczby
+app.get('/api/investors/count', async (req, res) => {
+  try {
+    const todayStr = new Date().toISOString().split('T')[0];
+
+    const total = await Investor.countDocuments();
+    const todayCount = await Investor.countDocuments({ date: todayStr });
+
+    res.json({ total, today: todayCount });
+  } catch (err) {
+    res.status(500).json({ total: 0, today: 0 });
+  }
+});
+
+// POST – zarejestruj inwestora (tylko jeśli nowy dzisiaj)
+app.post('/api/investors/register', async (req, res) => {
+  const { walletAddress } = req.body;
+  const todayStr = new Date().toISOString().split('T')[0];
+
+  if (!walletAddress) return res.status(400).json({ error: 'Brak adresu' });
+
+  try {
+    // Opcjonalna walidacja Solana (masz już PublicKey w App.jsx)
+    // const { PublicKey } = require('@solana/web3.js');
+    // new PublicKey(walletAddress); // rzuci błąd jeśli niepoprawny
+
+    const existing = await Investor.findOne({ walletAddress, date: todayStr });
+
+    if (!existing) {
+      await Investor.create({ walletAddress, date: todayStr });
+      res.json({ success: true, wasNew: true });
+    } else {
+      res.json({ success: true, wasNew: false });
+    }
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Błąd serwera' });
+  }
+});
 
 // ================== POZOSTAŁE ENDPOINTY ==================
 app.post('/addTransaction', addRandomTransaction);
