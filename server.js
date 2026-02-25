@@ -61,6 +61,17 @@ const rankingDb = new sqlite3.Database(RANKING_DB_PATH, (err) => {
   }
 });
 
+const investorsDb = new sqlite3.Database(RANKING_DB_PATH, (err) => {  // używamy tej samej bazy co ranking
+  if (err) console.error('Błąd investors:', err);
+});
+
+investorsDb.run(`
+  CREATE TABLE IF NOT EXISTS investors (
+    walletAddress TEXT PRIMARY KEY,
+    joinedAt DATETIME DEFAULT CURRENT_TIMESTAMP
+  )
+`, () => console.log('✅ Tabela investors gotowa'));
+
 // Backup przy starcie
 const backupPath = path.resolve('./ranking-backup.db');
 if (fs.existsSync(RANKING_DB_PATH)) {
@@ -77,62 +88,39 @@ if (fs.existsSync(RANKING_DB_PATH)) {
   });
 });
 
+// ====================== INVESTORS API (SQLite) ======================
 
-const mongoose = require('mongoose');
-
-const investorSchema = new mongoose.Schema({
-  walletAddress: {
-    type: String,
-    required: true,
-    unique: true,      // <-- najważniejsze – tylko raz na wallet
-    index: true
-  },
-  joinedAt: {
-    type: Date,
-    default: Date.now
-  }
+// GET licznik
+app.get('/api/investors/count', (req, res) => {
+  investorsDb.get('SELECT COUNT(*) as total FROM investors', (err, row) => {
+    if (err) {
+      console.error(err);
+      return res.json({ total: 0 });
+    }
+    res.json({ total: row.total });
+  });
 });
 
-module.exports = mongoose.model('Investor', investorSchema);
-
-const Investor = require('./models/Investor');   // lub ścieżka do pliku
-
-// ====================== INVESTORS API ======================
-
-// Pobierz aktualny licznik (używane co 15s + przy starcie)
-app.get('/api/investors/count', async (req, res) => {
-  try {
-    const total = await Investor.countDocuments();
-    res.json({ total });
-  } catch (err) {
-    console.error(err);
-    res.json({ total: 0 });
-  }
-});
-
-// Rejestracja portfela – +1 tylko jeśli nowy
-app.post('/api/investors/register', async (req, res) => {
+// POST rejestracja portfela (+1 tylko jeśli nowy)
+app.post('/api/investors/register', (req, res) => {
   const { walletAddress } = req.body;
 
   if (!walletAddress || walletAddress.length < 32) {
     return res.status(400).json({ error: 'Niepoprawny adres' });
   }
 
-  try {
-    // upsert = jeśli nie istnieje → dodaj, jeśli istnieje → nic nie rób
-    const result = await Investor.findOneAndUpdate(
-      { walletAddress },
-      { $setOnInsert: { joinedAt: new Date() } },
-      { upsert: true, new: true }
-    );
-
-    const wasNew = result.__v === 0; // nowy dokument ma __v = 0 przy upsert
-
-    res.json({ success: true, wasNew });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Błąd serwera' });
-  }
+  investorsDb.run(
+    'INSERT OR IGNORE INTO investors (walletAddress) VALUES (?)',
+    [walletAddress.toLowerCase()],   // normalizacja
+    function (err) {
+      if (err) {
+        console.error(err);
+        return res.status(500).json({ error: 'Błąd bazy' });
+      }
+      const wasNew = this.changes > 0;
+      res.json({ success: true, wasNew });
+    }
+  );
 });
 
 // ================== MIDDLEWARE ==================
