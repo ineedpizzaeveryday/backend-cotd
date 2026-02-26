@@ -27,7 +27,9 @@ const app = express();
 const PORT = process.env.PORT || 10000;
 
 // Ścieżki
-const RANKING_DB_PATH = path.resolve('./ranking.db');
+const RANKING_DB_PATH = IS_RENDER 
+  ? '/data/ranking.db' 
+  : path.resolve('./ranking.db');
 const DATA_DIR = path.resolve('./data');
 const coinDataPath = path.resolve('./data/coindata.json');
 
