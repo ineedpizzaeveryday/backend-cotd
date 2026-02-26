@@ -88,9 +88,26 @@ if (fs.existsSync(RANKING_DB_PATH)) {
   });
 });
 
+
+
+// ================== MIDDLEWARE ==================
+app.use(cors({
+  origin: [
+    'https://cookingcrypto.org',
+    'https://www.cookingcrypto.org',
+    'http://localhost:5173',
+    'https://cotd-one.vercel.app'
+  ],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true,
+  optionsSuccessStatus: 200
+}));
+
+app.use(express.json());
+
 // ====================== INVESTORS API (SQLite) ======================
 
-// GET licznik
 app.get('/api/investors/count', (req, res) => {
   investorsDb.get('SELECT COUNT(*) as total FROM investors', (err, row) => {
     if (err) {
@@ -101,7 +118,6 @@ app.get('/api/investors/count', (req, res) => {
   });
 });
 
-// POST rejestracja portfela (+1 tylko jeśli nowy)
 app.post('/api/investors/register', (req, res) => {
   const { walletAddress } = req.body;
 
@@ -111,7 +127,7 @@ app.post('/api/investors/register', (req, res) => {
 
   investorsDb.run(
     'INSERT OR IGNORE INTO investors (walletAddress) VALUES (?)',
-    [walletAddress.toLowerCase()],   // normalizacja
+    [walletAddress.toLowerCase()],
     function (err) {
       if (err) {
         console.error(err);
@@ -122,16 +138,6 @@ app.post('/api/investors/register', (req, res) => {
     }
   );
 });
-
-// ================== MIDDLEWARE ==================
-app.use(cors({
-  origin: ['https://cotd-one.vercel.app', 'http://localhost:5173', 'https://www.cookingcrypto.org', 'https://cookingcrypto.org'],
-  methods: ['GET', 'POST', 'PUT', 'DELETE'],
-  credentials: true
-}));
-
-app.use(express.json()); 
-
 
 app.use('/api/payoutpresale', payoutPresaleRouter);
 app.use('/api/payoutslot', payoutRouter);
